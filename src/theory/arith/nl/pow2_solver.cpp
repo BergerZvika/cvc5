@@ -166,6 +166,7 @@ void Pow2Solver::checkFullRefine()
     }
 
     // Place holder for additional lemma schemas
+    // even pow2 lemma
 
     // End of additional lemma schemas
 
