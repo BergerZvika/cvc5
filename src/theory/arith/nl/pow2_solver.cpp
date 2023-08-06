@@ -25,6 +25,7 @@
 #include "theory/arith/nl/nl_model.h"
 #include "theory/rewriter.h"
 #include "util/bitvector.h"
+#include <assert.h>
 
 using namespace cvc5::internal::kind;
 
@@ -166,7 +167,18 @@ void Pow2Solver::checkFullRefine()
     }
 
     // Place holder for additional lemma schemas
-    // even pow2 lemma
+    // even pow2 lemma: x > 0 -> pow(2) -1 mod 2 = 1
+      
+    if (x > 0 && pow2x != 0)
+    {
+      Node assumption = nm->mkNode(GT, n[0], d_zero);
+      Node power2_minus = nm->mkNode(kind::SUB, n, d_one);
+      Node mod_power2 = nm->mkNode(kind::INTS_MODULUS, power2_minus, d_two);
+      Node conclusion = nm->mkNode(EQUAL, mod_power2, d_one);
+      Node lem = nm->mkNode(IMPLIES, assumption, conclusion);
+      d_im.addPendingLemma(
+          lem, InferenceId::ARITH_NL_POW2_TRIVIAL_CASE_REFINE, nullptr, true);
+    }
 
     // End of additional lemma schemas
 
