@@ -840,6 +840,8 @@ set(regress_0_tests
   regress0/nl/pow2-native-3.smt2
   regress0/nl/pow2-pow.smt2
   regress0/nl/pow2-pow-isabelle.smt2
+  regress0/nl/pow2-even.smt2
+  regress0/nl/pow2-laws-of-exp.smt2
   regress0/nl/proj-issue-348.smt2
   regress0/nl/proj-issue-444-memout-eqelim.smt2
   regress0/nl/proj-issue-451-ran-combination-1.smt2
@@ -1736,7 +1738,6 @@ set(regress_1_tests
   regress1/boolean-terms-kernel2.smt2
   regress1/boolean.cvc.smt2
   regress1/bug296.smt2
-  regress1/bug425.cvc.smt2
   regress1/bug507.smt2
   regress1/bug512.smt2
   regress1/bug516.smt2

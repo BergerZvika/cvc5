@@ -177,7 +177,7 @@ void Pow2Solver::checkFullRefine()
       Node conclusion = nm->mkNode(EQUAL, mod_power2, d_one);
       Node lem = nm->mkNode(IMPLIES, assumption, conclusion);
       d_im.addPendingLemma(
-      lem, InferenceId::ARITH_NL_POW2_TRIVIAL_CASE_REFINE, nullptr, true);
+      lem, InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE, nullptr, true);
     }
 
     // laws of exponents: 2^x * 2^y = 2^(x+y)
@@ -198,7 +198,7 @@ void Pow2Solver::checkFullRefine()
       Node lem = nm->mkNode(EQUAL, n_mul_m, pow2_x_plus_y);
       // Node lem = nm->mkNode(IMPLIES, assumption, conclusion);
       d_im.addPendingLemma(
-          lem, InferenceId::ARITH_NL_POW2_MONOTONE_REFINE, nullptr, true);
+          lem, InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE, nullptr, true);
     }
 
     // End of additional lemma schemas

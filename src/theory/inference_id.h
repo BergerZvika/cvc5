@@ -168,6 +168,10 @@ enum class InferenceId
   ARITH_NL_ICP_CONFLICT,
   // propagation / contraction of variable bounds from icp
   ARITH_NL_ICP_PROPAGATION,
+  // pow2 even
+  ARITH_NL_POW2_EVEN_CASE_REFINE,
+  // muiltiply pow2 equal to addiition exponenet
+  ARITH_NL_POW2_EXP_LAW_REFINE,
   // ---------------------------------- end arith theory
 
   // ---------------------------------- arrays theory

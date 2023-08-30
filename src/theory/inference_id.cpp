@@ -106,6 +106,8 @@ const char* toString(InferenceId i)
     case InferenceId::ARITH_NL_ICP_CONFLICT: return "ARITH_NL_ICP_CONFLICT";
     case InferenceId::ARITH_NL_ICP_PROPAGATION:
       return "ARITH_NL_ICP_PROPAGATION";
+    case InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE: return "ARITH_NL_POW2_EVEN_CASE_REFINE";
+    case InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE: "return ARITH_NL_POW2_EXP_LAW_REFINE";
 
     case InferenceId::ARRAYS_EXT: return "ARRAYS_EXT";
     case InferenceId::ARRAYS_READ_OVER_WRITE: return "ARRAYS_READ_OVER_WRITE";
