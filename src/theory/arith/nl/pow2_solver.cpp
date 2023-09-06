@@ -168,7 +168,7 @@ void Pow2Solver::checkFullRefine()
 
     // Place holder for additional lemma schemas
 
-    // even pow2 lemma: x > 0 -> (pow(2) - 1) mod 2 = 1
+    // even pow2 lemma: x > 0 -> (pow2(x) - 1) mod 2 = 1
     if (x > 0 && pow2x != 0)
     {
       Node assumption = nm->mkNode(GT, n[0], d_zero);
