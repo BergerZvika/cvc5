@@ -169,13 +169,13 @@ void Pow2Solver::checkFullRefine()
     // Place holder for additional lemma schemas
 
     // even pow2 lemma: x > 0 -> (pow2(x) - 1) mod 2 = 1
-    if (x > 0 && pow2x != 0)
+    if (x > 0 && (pow2x - Integer(1)).modByPow2(1) != 1)
     {
-      Node assumption = nm->mkNode(GT, n[0], d_zero);
-      Node power2_minus = nm->mkNode(SUB, n, d_one);
-      Node mod_power2 = nm->mkNode(INTS_MODULUS, power2_minus, d_two);
-      Node conclusion = nm->mkNode(EQUAL, mod_power2, d_one);
-      Node lem = nm->mkNode(IMPLIES, assumption, conclusion);
+      Node assumption = nm->mkNode(Kind::GT, n[0], d_zero);
+      Node power2_minus = nm->mkNode(Kind::SUB, n, d_one);
+      Node mod_power2 = nm->mkNode(Kind::INTS_MODULUS, power2_minus, d_two);
+      Node conclusion = nm->mkNode(Kind::EQUAL, mod_power2, d_one);
+      Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
       d_im.addPendingLemma(
       lem, InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE, nullptr, true);
     }
@@ -190,17 +190,29 @@ void Pow2Solver::checkFullRefine()
       Integer y = valYConcrete.getConst<Rational>().getNumerator();
       Integer pow2y = valPow2yAbstract.getConst<Rational>().getNumerator();
 
+      for (uint64_t k = j + 1; k < size; k++)
+      {
+        Node q = d_pow2s[k];
+        Node valPow2zAbstract = d_model.computeAbstractModelValue(q);
+        Node valZConcrete = d_model.computeConcreteModelValue(q[0]);
 
-      // Node assumption = nm->mkNode(LEQ, n[0], m[0]);
-      Node n_mul_m = nm->mkNode(MULT, n, m);
-      Node x_plus_y = nm->mkNode(ADD,n[0], m[0]);
-      Node pow2_x_plus_y = nm->mkNode(POW2, x_plus_y);
-      Node lem = nm->mkNode(EQUAL, n_mul_m, pow2_x_plus_y);
-      // Node lem = nm->mkNode(IMPLIES, assumption, conclusion);
-      d_im.addPendingLemma(
-          lem, InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE, nullptr, true);
+        Integer z = valZConcrete.getConst<Rational>().getNumerator();
+        Integer pow2z = valPow2zAbstract.getConst<Rational>().getNumerator();
+
+        
+        if (x > 0 && y > 0 && x + y == z && pow2x * pow2y != pow2z)
+        {
+          Node x_plus_y = nm->mkNode(Kind::ADD,n[0], m[0]);
+          Node assumption = nm->mkNode(Kind::EQUAL, x_plus_y, q[0]);
+          Node n_mul_m = nm->mkNode(Kind::MULT, n, m);
+          Node conclusion = nm->mkNode(Kind::EQUAL, n_mul_m, q);
+          Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
+          d_im.addPendingLemma(
+              lem, InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE, nullptr, true);
+        }
+      }
+
     }
-
     // End of additional lemma schemas
 
     // this is the most naive model-based schema based on model values
