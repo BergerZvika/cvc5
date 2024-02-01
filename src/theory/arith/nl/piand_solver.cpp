@@ -229,8 +229,8 @@ void PIAndSolver::checkFullRefine()
 Node PIAndSolver::valueBasedLemma(Node i)
 {
   Assert(i.getKind() == PIAND);
-  Node x = i[0];
-  Node y = i[1];
+  Node x = i[1];
+  Node y = i[2];
 
   Node valX = d_model.computeConcreteModelValue(x);
   Node valY = d_model.computeConcreteModelValue(y);
