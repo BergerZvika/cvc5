@@ -221,6 +221,7 @@ RewriteResponse ArithRewriter::preRewriteTerm(TNode t){
       case kind::MULT:
       case kind::NONLINEAR_MULT: return preRewriteMult(t);
       case kind::IAND: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PIAND: return RewriteResponse(REWRITE_DONE, t);
       case kind::POW2: return RewriteResponse(REWRITE_DONE, t);
       case kind::EXPONENTIAL:
       case kind::SINE:
@@ -271,6 +272,7 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t){
       case kind::MULT:
       case kind::NONLINEAR_MULT: return postRewriteMult(t);
       case kind::IAND: return postRewriteIAnd(t);
+      case kind::PIAND: return postRewritePIAnd(t);
       case kind::POW2: return postRewritePow2(t);
       case kind::EXPONENTIAL:
       case kind::SINE:
@@ -812,6 +814,57 @@ RewriteResponse ArithRewriter::postRewriteIAnd(TNode t)
     }
   }
   return RewriteResponse(REWRITE_DONE, t);
+}
+
+RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
+{
+   Assert(t.getKind() == kind::PIAND);
+   NodeManager* nm = NodeManager::currentNM();
+    // if constant, we eliminate
+    if (t[0].isConst() && t[1].isConst() && t[2].isConst())
+    {
+      size_t bsize = t[0].getConst<IntAnd>().d_size;
+      Node iToBvop = nm->mkConst(IntToBitVector(bsize));
+      Node arg1 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[1]);
+      Node arg2 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[2]);
+      Node bvand = nm->mkNode(kind::BITVECTOR_AND, arg1, arg2);
+      Node ret = nm->mkNode(kind::BITVECTOR_TO_NAT, bvand);
+      return RewriteResponse(REWRITE_AGAIN_FULL, ret);
+    }
+    else if (t[1] > t[2])
+    {
+      // ((_ piand k) x y) ---> ((_ piand k) y x) if x > y by node ordering
+      Node ret = nm->mkNode(kind::PIAND, t[0], t[2], t[1]);
+      return RewriteResponse(REWRITE_AGAIN, ret);
+    }
+    else if (t[1] == t[2])
+    {
+      // ((_ piand k) x x) ---> (mod x 2^k)
+      Node twok = nm->mkNode(kind::POW2, t[0]);
+      Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+      return RewriteResponse(REWRITE_AGAIN, ret);
+    }
+    // simplifications involving constants
+    for (unsigned i = 1; i < 3; i++)
+    {
+      if (!t[i].isConst())
+      {
+        continue;
+      }
+      if (t[i].getConst<Rational>().sgn() == 0)
+      {
+        // ((_ piand k) 0 y) ---> 0
+        return RewriteResponse(REWRITE_DONE, t[i]);
+      }
+      // if (t[i].getConst<Rational>().getNumerator() == Integer(2).pow(bsize) - 1)
+      // {
+      //   // ((_ iand k) 111...1 y) ---> (mod y 2^k)
+      //   Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
+      //   Node ret = nm->mkNode(kind::INTS_MODULUS, t[1 - i], twok);
+      //   return RewriteResponse(REWRITE_AGAIN, ret);
+      // }
+    }
+   return RewriteResponse(REWRITE_DONE, t);
 }
 
 RewriteResponse ArithRewriter::postRewritePow2(TNode t)

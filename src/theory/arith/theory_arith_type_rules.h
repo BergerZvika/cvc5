@@ -103,6 +103,16 @@ class IAndTypeRule
 };
 
 /**
+ * Type rule for the PIAND kind.
+ * Always returns integerType.
+ */
+class PIAndTypeRule
+{
+ public:
+  static TypeNode computeType(NodeManager* nodeManager, TNode n, bool check);
+};
+
+/**
  * Type rule for the POW2 operator.
  * Always returns integerType.
  */

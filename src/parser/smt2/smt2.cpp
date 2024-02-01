@@ -551,8 +551,10 @@ Command* Smt2::setLogic(std::string name, bool fromCommand)
     {
       // integer version of AND
       addIndexedOperator(cvc5::IAND, "iand");
+      addOperator(cvc5::PIAND, "piand");
       // pow2
       addOperator(cvc5::POW2, "int.pow2");
+      
     }
   }
 

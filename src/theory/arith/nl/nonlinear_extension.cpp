@@ -62,6 +62,7 @@ NonlinearExtension::NonlinearExtension(Env& env,
       d_covSlv(d_env, d_im, d_model),
       d_icpSlv(d_env, d_im),
       d_iandSlv(env, d_im, state, d_model),
+      d_piandSlv(env, d_im, state, d_model),
       d_pow2Slv(env, d_im, state, d_model)
 {
   d_extTheory.addFunctionKind(kind::NONLINEAR_MULT);
@@ -69,6 +70,7 @@ NonlinearExtension::NonlinearExtension(Env& env,
   d_extTheory.addFunctionKind(kind::SINE);
   d_extTheory.addFunctionKind(kind::PI);
   d_extTheory.addFunctionKind(kind::IAND);
+  d_extTheory.addFunctionKind(kind::PIAND);
   d_extTheory.addFunctionKind(kind::POW2);
   d_true = NodeManager::currentNM()->mkConst(true);
   d_zero = NodeManager::currentNM()->mkConst(CONST_RATIONAL, Rational(0));
@@ -102,7 +104,7 @@ void NonlinearExtension::preRegisterTerm(TNode n)
       throw LogicException(ss.str());
     }
   }
-  if (isTranscendentalKind(k) || k == Kind::IAND || k == Kind::POW2)
+  if (isTranscendentalKind(k) || k == Kind::IAND || k == Kind::POW2 || k == Kind::PIAND)
   {
     if (options().arith.nlCov && !options().arith.nlCovForce)
     {
@@ -480,6 +482,11 @@ void NonlinearExtension::runStrategy(Theory::Effort effort,
         break;
       case InferStep::IAND_FULL: d_iandSlv.checkFullRefine(); break;
       case InferStep::IAND_INITIAL: d_iandSlv.checkInitialRefine(); break;
+      case InferStep::PIAND_INIT:
+        d_piandSlv.initLastCall(assertions, false_asserts, xts);
+        break;
+      case InferStep::PIAND_FULL: d_piandSlv.checkFullRefine(); break;
+      case InferStep::PIAND_INITIAL: d_piandSlv.checkInitialRefine(); break;
       case InferStep::POW2_INIT:
         d_pow2Slv.initLastCall(assertions, false_asserts, xts);
         break;

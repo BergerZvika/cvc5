@@ -27,6 +27,7 @@ operator ABS 1 "absolute value"
 parameterized DIVISIBLE DIVISIBLE_OP 1 "divisibility-by-k predicate; first parameter is a DIVISIBLE_OP, second is integer term"
 operator POW 2 "arithmetic power"
 operator POW2 1 "arithmetic power of 2"
+operator PIAND 3 "parametric integer and"
 
 operator EXPONENTIAL 1 "exponential"
 operator SINE 1 "sine"
@@ -169,6 +170,7 @@ typerule ARCCOSECANT "SimpleTypeRule<RReal, AReal>"
 typerule ARCSECANT "SimpleTypeRule<RReal, AReal>"
 typerule ARCCOTANGENT "SimpleTypeRule<RReal, AReal>"
 typerule POW2 "SimpleTypeRule<RInteger, AInteger>"
+typerule PIAND "SimpleTypeRule<RInteger, AInteger, AInteger>"
 
 typerule SQRT "SimpleTypeRule<RReal, AReal>"
 

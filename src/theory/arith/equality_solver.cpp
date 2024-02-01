@@ -50,6 +50,7 @@ void EqualitySolver::finishInit()
   d_ee->addFunctionKind(kind::EXPONENTIAL);
   d_ee->addFunctionKind(kind::SINE);
   d_ee->addFunctionKind(kind::IAND);
+  d_ee->addFunctionKind(kind::PIAND);
   d_ee->addFunctionKind(kind::POW2);
 }
 

@@ -92,6 +92,10 @@ const char* toString(InferenceId i)
       return "ARITH_NL_IAND_SUM_REFINE";
     case InferenceId::ARITH_NL_IAND_BITWISE_REFINE:
       return "ARITH_NL_IAND_BITWISE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_INIT_REFINE:
+      return "ARITH_NL_PIAND_INIT_REFINE";
+    case InferenceId::ARITH_NL_PIAND_VALUE_REFINE:
+      return "ARITH_NL_PIAND_VALUE_REFINE";
     case InferenceId::ARITH_NL_POW2_INIT_REFINE:
       return "ARITH_NL_POW2_INIT_REFINE";
     case InferenceId::ARITH_NL_POW2_VALUE_REFINE:

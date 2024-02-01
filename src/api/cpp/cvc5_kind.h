@@ -503,6 +503,44 @@ enum Kind : int32_t
    *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
    */
   IAND,
+    /**
+   * Parametric Integer and.
+   *
+   * \rst
+   * Operator for bit-wise ``AND`` over parametric integers by a (positive)
+   * bit-width :math:`k`.
+   *
+   * .. code:: smtlib
+   *
+   *     ((_ piand k) i_1 i_2)
+   *
+   * is equivalent to
+   *
+   * .. code:: smtlib
+   *
+   *     ((_ piand k) i_1 i_2)
+   *     (bv2int (bvand ((_ int2bv k) i_1) ((_ int2bv k) i_2)))
+   *
+   * for all integers ``i_1``, ``i_2``.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of Sort Int
+   *
+   * - Indices: ``1``
+   *
+   *   - ``1:`` Bit-width :math:`k`
+   * \endrst
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - Solver::mkTerm(const Op&, const std::vector<Term>&) const
+   *
+   * - Create Op of this kind with:
+   *
+   *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
+   */
+  PIAND,
   /**
    * Power of two.
    *

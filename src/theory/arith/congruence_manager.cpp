@@ -104,6 +104,7 @@ void ArithCongruenceManager::finishInit(eq::EqualityEngine* ee)
   d_ee->addFunctionKind(kind::EXPONENTIAL);
   d_ee->addFunctionKind(kind::SINE);
   d_ee->addFunctionKind(kind::IAND);
+  d_ee->addFunctionKind(kind::PIAND);
   d_ee->addFunctionKind(kind::POW2);
   // the proof equality engine is the one from the equality engine
   d_pfee = d_ee->getProofEqualityEngine();
