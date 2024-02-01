@@ -1,0 +1,14 @@
+(set-logic ALL)
+(set-option :produce-models true)
+(set-option :incremental true)
+(set-info :smt-lib-version 2.6)
+(set-info :status unsat)
+(declare-const k Int)
+(declare-const x Int)
+(declare-const y Int)
+(assert (> k 0))
+(assert (> 0 (piand k x y)))
+(check-sat)
+(exit)
+
+

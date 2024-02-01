@@ -844,6 +844,8 @@ set(regress_0_tests
   regress0/nl/pow2-even.smt2
   regress0/nl/pow2-laws-of-exp.smt2
   regress0/nl/pow2-laws-of-neg-exp.smt2
+  regress0/nl/piand-range.smt2
+  regress0/nl/piand-possitive.smt2
   regress0/nl/proj-issue-348.smt2
   regress0/nl/proj-issue-444-memout-eqelim.smt2
   regress0/nl/proj-issue-451-ran-combination-1.smt2
