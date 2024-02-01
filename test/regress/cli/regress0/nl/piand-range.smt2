@@ -10,5 +10,3 @@
 (assert (< x (piand k x y)))
 (check-sat)
 (exit)
-
-
