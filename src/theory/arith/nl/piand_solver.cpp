@@ -102,7 +102,6 @@ void PIAndSolver::checkInitialRefine()
       std::vector<Node> conj;
       // piand(x,y)=piand(y,x) is guaranteed by rewriting
       Assert(i[0] <= i[1]);
-      // conj.push_back(i.eqNode(nm->mkNode(IAND, op, i[1], i[0])));
       // 0 <= piand(x,y) < 2^k
       conj.push_back(nm->mkNode(LEQ, d_zero, i));
       // conj.push_back(nm->mkNode(LT, i, rewrite(d_iandUtils.twoToK(k))));
