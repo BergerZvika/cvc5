@@ -25,7 +25,6 @@
 #include "theory/arith/nl/nl_model.h"
 #include "theory/rewriter.h"
 #include "util/bitvector.h"
-//#include "util/iand.h"
 
 using namespace cvc5::internal::kind;
 
@@ -69,7 +68,6 @@ void PIAndSolver::initLastCall(const std::vector<Node>& assertions,
       // don't care about other terms
       continue;
     }
-    // size_t bsize = a.getOperator().getConst<IntAnd>().d_size;
     d_piands[a[0]].push_back(a);
   }
 
@@ -92,9 +90,6 @@ void PIAndSolver::checkInitialRefine()
         continue;
       }
       d_initRefine.insert(i);
-      // Node op = i.getOperator();
-      // size_t bsize = op.getConst<IntAnd>().d_size;
-      // Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
       Node twok = nm->mkNode(kind::POW2, k);
       Node arg0Mod = nm->mkNode(kind::INTS_MODULUS, i[0], twok);
       Node arg1Mod = nm->mkNode(kind::INTS_MODULUS, i[1], twok);
@@ -104,7 +99,6 @@ void PIAndSolver::checkInitialRefine()
       Assert(i[0] <= i[1]);
       // 0 <= piand(x,y) < 2^k
       conj.push_back(nm->mkNode(LEQ, d_zero, i));
-      // conj.push_back(nm->mkNode(LT, i, rewrite(d_iandUtils.twoToK(k))));
       conj.push_back(nm->mkNode(LT, i, twok));
       // piand(x,y)<=mod(x, 2^k)
       conj.push_back(nm->mkNode(LEQ, i, arg0Mod));
@@ -112,6 +106,8 @@ void PIAndSolver::checkInitialRefine()
       conj.push_back(nm->mkNode(LEQ, i, arg1Mod));
       // x=y => piand(x,y)=mod(x, 2^k)
       conj.push_back(nm->mkNode(IMPLIES, i[0].eqNode(i[1]), i.eqNode(arg0Mod)));
+      // k > 0
+      conj.push_back(nm->mkNode(GT, k, d_zero));
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(AND, conj);
       Trace("piand-lemma") << "PIAndSolver::Lemma: " << lem << " ; INIT_REFINE"
                           << std::endl;
