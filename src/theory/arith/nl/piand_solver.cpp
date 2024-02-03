@@ -70,8 +70,7 @@ void PIAndSolver::initLastCall(const std::vector<Node>& assertions,
     }
     d_piands[a[0]].push_back(a);
   }
-
-  Trace("piand") << "We have " << d_piands.size() << " PIAND terms." << std::endl;
+  Trace("piand") << "We have " << d_piands.size() << " PIAND bit-width." << std::endl;
 }
 
 void PIAndSolver::checkInitialRefine()
@@ -91,12 +90,12 @@ void PIAndSolver::checkInitialRefine()
       }
       d_initRefine.insert(i);
       Node twok = nm->mkNode(kind::POW2, k);
-      Node arg0Mod = nm->mkNode(kind::INTS_MODULUS, i[0], twok);
-      Node arg1Mod = nm->mkNode(kind::INTS_MODULUS, i[1], twok);
+      Node arg0Mod = nm->mkNode(kind::INTS_MODULUS, i[1], twok);
+      Node arg1Mod = nm->mkNode(kind::INTS_MODULUS, i[2], twok);
       // initial refinement lemmas
       std::vector<Node> conj;
       // piand(x,y)=piand(y,x) is guaranteed by rewriting
-      Assert(i[0] <= i[1]);
+      Assert(i[1] <= i[2]);
       // 0 <= piand(x,y) < 2^k
       conj.push_back(nm->mkNode(LEQ, d_zero, i));
       conj.push_back(nm->mkNode(LT, i, twok));
@@ -105,7 +104,7 @@ void PIAndSolver::checkInitialRefine()
       // piand(x,y)<=mod(y, 2^k)
       conj.push_back(nm->mkNode(LEQ, i, arg1Mod));
       // x=y => piand(x,y)=mod(x, 2^k)
-      conj.push_back(nm->mkNode(IMPLIES, i[0].eqNode(i[1]), i.eqNode(arg0Mod)));
+      conj.push_back(nm->mkNode(IMPLIES, i[1].eqNode(i[2]), i.eqNode(arg0Mod)));
       // k > 0
       conj.push_back(nm->mkNode(GT, k, d_zero));
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(AND, conj);
@@ -118,20 +117,23 @@ void PIAndSolver::checkInitialRefine()
 
 void PIAndSolver::checkFullRefine()
 {
+  
   Trace("piand-check") << "PIAndSolver::checkFullRefine";
   Trace("piand-check") << "PIAND terms: " << std::endl;
   for (const std::pair<Node, std::vector<Node> >& is : d_piands)
   {
+    
     // the reference bitwidth
     Node k = is.first;
     for (const Node& i : is.second)
     {
+      std::cout << "i: " << i << std::endl;
       Node valAndXY = d_model.computeAbstractModelValue(i);
       Node valAndXYC = d_model.computeConcreteModelValue(i);
       if (TraceIsOn("piand-check"))
       {
-        Node x = i[0];
-        Node y = i[1];
+        Node x = i[1];
+        Node y = i[2];
 
         Node valX = d_model.computeConcreteModelValue(x);
         Node valY = d_model.computeConcreteModelValue(y);
@@ -191,6 +193,7 @@ void PIAndSolver::checkFullRefine()
       // }
     }
   }
+  std::cout << "end checkFullRefine: " << std::endl;
 }
 
 // Node PIAndSolver::convertToBvK(unsigned k, Node n) const
