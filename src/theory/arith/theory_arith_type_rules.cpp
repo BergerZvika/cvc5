@@ -168,6 +168,21 @@ TypeNode IAndTypeRule::computeType(NodeManager* nodeManager,
   return nodeManager->integerType();
 }
 
+// TypeNode PIAndOpTypeRule::computeType(NodeManager* nodeManager,
+//                                      TNode n,
+//                                      bool check)
+// {
+//   if (n.getKind() != kind::PIAND_OP)
+//   {
+//     InternalError() << "PIAND_OP typerule invoked for " << n << " instead of PIAND_OP kind";
+//   }
+//   TypeNode iType = nodeManager->integerType();
+//   std::vector<TypeNode> argTypes;
+//   argTypes.push_back(iType);
+//   argTypes.push_back(iType);
+//   return nodeManager->mkFunctionType(argTypes, iType);
+// }
+
 TypeNode PIAndTypeRule::computeType(NodeManager* nodeManager,
                                    TNode n,
                                    bool check)

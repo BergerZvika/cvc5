@@ -823,7 +823,7 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     // if constant, we eliminate
     if (t[0].isConst() && t[1].isConst() && t[2].isConst())
     {
-      size_t bsize = t[0].getConst<IntAnd>().d_size;
+      size_t bsize = std::stoul(t[0].toString());
       Node iToBvop = nm->mkConst(IntToBitVector(bsize));
       Node arg1 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[1]);
       Node arg2 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[2]);

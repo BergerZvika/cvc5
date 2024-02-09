@@ -93,6 +93,11 @@ Node Rewriter::rewrite(TNode node) {
     // eagerly for the sake of efficiency here.
     return node;
   }
+  // Kind ak = node.getKind();
+  // if (ak == cvc5::internal::kind::PIAND)
+  // {
+  //   cout << "node: " << node << endl;
+  // }
   return getInstance()->rewriteTo(theoryOf(node), node);
 }
 

@@ -105,8 +105,12 @@ void PIAndSolver::checkInitialRefine()
       conj.push_back(nm->mkNode(LEQ, i, arg1Mod));
       // x=y => piand(x,y)=mod(x, 2^k)
       conj.push_back(nm->mkNode(IMPLIES, i[1].eqNode(i[2]), i.eqNode(arg0Mod)));
-      // k > 0
-      conj.push_back(nm->mkNode(GT, k, d_zero));
+      // TODO:    sumbased lema >=
+      //     bitwise lemma >= k 
+      // k <= 0 -> piand (k, x, y) = 0 
+      Node nonegative = nm->mkNode(LEQ, k, d_zero);
+      Node equal_zero = nm->mkNode(EQUAL, i, d_zero);
+      conj.push_back(nm->mkNode(IMPLIES, nonegative, equal_zero));
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(AND, conj);
       Trace("piand-lemma") << "PIAndSolver::Lemma: " << lem << " ; INIT_REFINE"
                           << std::endl;
@@ -127,7 +131,6 @@ void PIAndSolver::checkFullRefine()
     Node k = is.first;
     for (const Node& i : is.second)
     {
-      std::cout << "i: " << i << std::endl;
       Node valAndXY = d_model.computeAbstractModelValue(i);
       Node valAndXYC = d_model.computeConcreteModelValue(i);
       if (TraceIsOn("piand-check"))
@@ -193,7 +196,6 @@ void PIAndSolver::checkFullRefine()
       // }
     }
   }
-  std::cout << "end checkFullRefine: " << std::endl;
 }
 
 // Node PIAndSolver::convertToBvK(unsigned k, Node n) const
@@ -232,18 +234,22 @@ void PIAndSolver::checkFullRefine()
 Node PIAndSolver::valueBasedLemma(Node i)
 {
   Assert(i.getKind() == PIAND);
+
+  Node k = i[0];
   Node x = i[1];
   Node y = i[2];
 
+  Node valK = d_model.computeConcreteModelValue(k);
   Node valX = d_model.computeConcreteModelValue(x);
   Node valY = d_model.computeConcreteModelValue(y);
 
   NodeManager* nm = NodeManager::currentNM();
-  Node valC = nm->mkNode(PIAND, i.getOperator(), valX, valY);
+  Node valC = nm->mkNode(PIAND, valK, valX, valY);
+
   valC = rewrite(valC);
 
   Node lem = nm->mkNode(
-      IMPLIES, nm->mkNode(AND, x.eqNode(valX), y.eqNode(valY)), i.eqNode(valC));
+      IMPLIES, nm->mkNode(AND, k.eqNode(valK), x.eqNode(valX), y.eqNode(valY)), i.eqNode(valC));
   return lem;
 }
 

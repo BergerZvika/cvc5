@@ -103,6 +103,16 @@ class IAndTypeRule
 };
 
 /**
+ * Type rule for the PIAND operator kind.
+ * Always returns (integerType, integerType) -> integerType.
+ */
+class PIAndOpTypeRule
+{
+ public:
+  static TypeNode computeType(NodeManager* nodeManager, TNode n, bool check);
+};
+
+/**
  * Type rule for the PIAND kind.
  * Always returns integerType.
  */
