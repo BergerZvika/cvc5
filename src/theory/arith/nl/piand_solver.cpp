@@ -167,16 +167,12 @@ void PIAndSolver::checkFullRefine()
         Node lem_sum = sumBasedLemma(i, EQUAL);
         d_im.addPendingLemma(
               lem_sum, InferenceId::ARITH_NL_PIAND_SUM_REFINE, nullptr, true);
-        std::cout << "lem_sum" << std::endl;
       } else if (options().smt.PiandMode == options::PIandMode::BITWISE)
       {
         Node lem_bit = bitwiseLemma(i);
         d_im.addPendingLemma(
              lem_bit, InferenceId::ARITH_NL_PIAND_BITWISE_REFINE, nullptr, true);
-            std::cout << "lem_bit" << std::endl;
       }
-        
-        
 
         Node lem = valueBasedLemma(i);
         Trace("piand-lemma")
