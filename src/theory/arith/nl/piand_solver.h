@@ -22,7 +22,7 @@
 #include "context/cdhashset.h"
 #include "expr/node.h"
 #include "smt/env_obj.h"
-//#include "theory/arith/nl/iand_utils.h"
+#include "theory/arith/nl/iand_utils.h"
 
 namespace cvc5::internal {
 namespace theory {
@@ -96,7 +96,7 @@ class PIAndSolver : protected EnvObj
   Node d_one;
   Node d_two;
 
-  //IAndUtils d_iandUtils;
+  IAndUtils d_iandUtils;
   /** pIAND terms that have been given initial refinement lemmas */
   NodeSet d_initRefine;
   /** all PIAND terms, for each bit-width */
@@ -114,24 +114,24 @@ class PIAndSolver : protected EnvObj
   // /** make inot */
   // Node mkINot(unsigned k, Node i) const;
   /**
-   * Value-based refinement lemma for i of the form ((_ iand k) x y). Returns:
+   * Value-based refinement lemma for i of the form ((_ piand k) x y). Returns:
    *   x = M(x) ^ y = M(y) =>
-   *     ((_ iand k) x y) = rewrite(((_ iand k) M(x) M(y)))
+   *     ((_ piand k) x y) = rewrite(((_ piand k) M(x) M(y)))
    */
   Node valueBasedLemma(Node i);
   /**
-   * Sum-based refinement lemma for i of the form ((_ iand k) x y). Returns:
+   * Sum-based refinement lemma for i of the form ((_ piand k) x y). Returns:
    * i = 2^0*min(x[0],y[0])+...2^{k-1}*min(x[k-1],y[k-1])
    * where x[i] is x div i mod 2
    * and min is defined with an ite.
    */
-  // Node sumBasedLemma(Node i);
-  /** Bitwise refinement lemma for i of the form ((_ iand k) x y). Returns:
+  Node sumBasedLemma(Node i, Kind kind);
+  /** Bitwise refinement lemma for i of the form ((_ piand k) x y). Returns:
    *   x[j] & y[j] == ite(x[j] == 1 /\ y[j] == 1, 1, 0)
    *   for all j where M(x)[j] ^ M(y)[j]
-   *   does not match M(((_ iand k) x y))
+   *   does not match M(((_ piand k) x y))
    */
-  // Node bitwiseLemma(Node i);
+  Node bitwiseLemma(Node i);
 }; /* class PIAndSolver */
 
 }  // namespace nl

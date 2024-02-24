@@ -25,6 +25,7 @@
 #include "theory/arith/nl/nl_model.h"
 #include "theory/rewriter.h"
 #include "util/bitvector.h"
+\
 
 using namespace cvc5::internal::kind;
 
@@ -92,6 +93,8 @@ void PIAndSolver::checkInitialRefine()
       Node twok = nm->mkNode(kind::POW2, k);
       Node arg0Mod = nm->mkNode(kind::INTS_MODULUS, i[1], twok);
       Node arg1Mod = nm->mkNode(kind::INTS_MODULUS, i[2], twok);
+      Node plus = nm->mkNode(kind::ADD , i[1], i[2]);
+      Node twok_minus_one = nm->mkNode(kind::SUB, twok, d_one);
       // initial refinement lemmas
       std::vector<Node> conj;
       // piand(x,y)=piand(y,x) is guaranteed by rewriting
@@ -105,6 +108,9 @@ void PIAndSolver::checkInitialRefine()
       conj.push_back(nm->mkNode(LEQ, i, arg1Mod));
       // x=y => piand(x,y)=mod(x, 2^k)
       conj.push_back(nm->mkNode(IMPLIES, i[1].eqNode(i[2]), i.eqNode(arg0Mod)));
+      // x+y = 2^k-1 => piand(x,y) = 0
+      conj.push_back(nm->mkNode(IMPLIES, plus.eqNode(twok_minus_one), i.eqNode(d_zero)));
+      // k > 1 => piand(k x y) = piand (k-1, x mod 2^k-1, y mod 2^k-1) + (2^k-1 * min_k-1_bit) 
       // TODO:    sumbased lema >=
       //     bitwise lemma >= k 
       // k <= 0 -> piand (k, x, y) = 0 
@@ -145,15 +151,6 @@ void PIAndSolver::checkFullRefine()
             << "* " << i << ", value = " << valAndXY << std::endl;
         Trace("piand-check") << "  actual (" << valX << ", " << valY
                             << ") = " << valAndXYC << std::endl;
-        // print the bit-vector versions
-        // Node bvalX = convertToBvK(k, valX);
-        // Node bvalY = convertToBvK(k, valY);
-        // Node bvalAndXY = convertToBvK(k, valAndXY);
-        // Node bvalAndXYC = convertToBvK(k, valAndXYC);
-
-        // Trace("piand-check") << "  bv-value = " << bvalAndXY << std::endl;
-        // Trace("piand-check") << "  bv-actual (" << bvalX << ", " << bvalY
-        //                     << ") = " << bvalAndXYC << std::endl;
       }
       if (valAndXY == valAndXYC)
       {
@@ -162,29 +159,25 @@ void PIAndSolver::checkFullRefine()
       }
 
       // ************* additional lemma schemas go here
-      // if (options().smt.iandMode == options::IandMode::SUM)
-      // {
-      //   Node lem = sumBasedLemma(i);  // add lemmas based on sum mode
-      //   Trace("piand-lemma")
-      //       << "PIAndSolver::Lemma: " << lem << " ; SUM_REFINE" << std::endl;
-      //   // note that lemma can contain div/mod, and will be preprocessed in the
-      //   // prop engine
-      //   d_im.addPendingLemma(
-      //       lem, InferenceId::ARITH_NL_PIAND_SUM_REFINE, nullptr, true);
-      // }
-      // else if (options().smt.iandMode == options::IandMode::BITWISE)
-      // {
-      //   Node lem = bitwiseLemma(i);  // check for violated bitwise axioms
-      //   Trace("iand-lemma")
-      //       << "IAndSolver::Lemma: " << lem << " ; BITWISE_REFINE" << std::endl;
-      //   // note that lemma can contain div/mod, and will be preprocessed in the
-      //   // prop engine
-      //   d_im.addPendingLemma(
-      //       lem, InferenceId::ARITH_NL_IAND_BITWISE_REFINE, nullptr, true);
-      // }
-      // else
-      // {
+
         // this is the most naive model-based schema based on model values
+
+      if (options().smt.PiandMode == options::PIandMode::SUM)
+      {
+        Node lem_sum = sumBasedLemma(i, EQUAL);
+        d_im.addPendingLemma(
+              lem_sum, InferenceId::ARITH_NL_PIAND_SUM_REFINE, nullptr, true);
+        std::cout << "lem_sum" << std::endl;
+      } else if (options().smt.PiandMode == options::PIandMode::BITWISE)
+      {
+        Node lem_bit = bitwiseLemma(i);
+        d_im.addPendingLemma(
+             lem_bit, InferenceId::ARITH_NL_PIAND_BITWISE_REFINE, nullptr, true);
+            std::cout << "lem_bit" << std::endl;
+      }
+        
+        
+
         Node lem = valueBasedLemma(i);
         Trace("piand-lemma")
             << "PIAndSolver::Lemma: " << lem << " ; VALUE_REFINE" << std::endl;
@@ -193,7 +186,6 @@ void PIAndSolver::checkFullRefine()
                              InferenceId::ARITH_NL_PIAND_VALUE_REFINE,
                              nullptr,
                              true);
-      // }
     }
   }
 }
@@ -253,66 +245,67 @@ Node PIAndSolver::valueBasedLemma(Node i)
   return lem;
 }
 
-// Node PIAndSolver::sumBasedLemma(Node i)
-// {
-//   Assert(i.getKind() == IAND);
-//   Node x = i[0];
-//   Node y = i[1];
-//   size_t bvsize = i.getOperator().getConst<IntAnd>().d_size;
-//   uint64_t granularity = options().smt.BVAndIntegerGranularity;
-//   NodeManager* nm = NodeManager::currentNM();
-//   Node lem = nm->mkNode(
-//       EQUAL, i, d_iandUtils.createSumNode(x, y, bvsize, granularity));
-//   return lem;
-// }
+Node PIAndSolver::sumBasedLemma(Node i, Kind kind)
+{
+  Assert(i.getKind() == PIAND);
+  Node k = d_model.computeConcreteModelValue(i[0]);
+  Node x = i[1];
+  Node y = i[2];
+  uint64_t granularity = options().smt.BVAndIntegerGranularity;
+  NodeManager* nm = NodeManager::currentNM();
+  Node lem = nm->mkNode(
+      kind, i, d_iandUtils.createSumNode(x, y, std::stoul(k.toString()), granularity));
+  return lem;
+}
 
-// Node PIAndSolver::bitwiseLemma(Node i)
-// {
-//   Assert(i.getKind() == IAND);
-//   Node x = i[0];
-//   Node y = i[1];
+Node PIAndSolver::bitwiseLemma(Node i)
+{
+  Assert(i.getKind() == PIAND);
+  Node k = d_model.computeConcreteModelValue(i[0]);
+  Node x = i[1];
+  Node y = i[2];
 
-//   unsigned bvsize = i.getOperator().getConst<IntAnd>().d_size;
-//   uint64_t granularity = options().smt.BVAndIntegerGranularity;
+  unsigned bvsize = std::stoul(k.toString());
+  uint64_t granularity = options().smt.BVAndIntegerGranularity;
 
-//   Rational absI = d_model.computeAbstractModelValue(i).getConst<Rational>();
-//   Rational concI = d_model.computeConcreteModelValue(i).getConst<Rational>();
+  Rational absI = d_model.computeAbstractModelValue(i).getConst<Rational>();
+  Rational concI = d_model.computeConcreteModelValue(i).getConst<Rational>();
 
-//   Assert(absI.isIntegral());
-//   Assert(concI.isIntegral());
+  Assert(absI.isIntegral());
+  Assert(concI.isIntegral());
 
-//   BitVector bvAbsI = BitVector(bvsize, absI.getNumerator());
-//   BitVector bvConcI = BitVector(bvsize, concI.getNumerator());
+  BitVector bvAbsI = BitVector(bvsize, absI.getNumerator());
+  BitVector bvConcI = BitVector(bvsize, concI.getNumerator());
 
-//   NodeManager* nm = NodeManager::currentNM();
-//   Node lem = d_true;
+  NodeManager* nm = NodeManager::currentNM();
+  Node lem = d_true;
 
-//   // compare each bit to bvI
-//   Node cond;
-//   Node bitIAnd;
-//   uint64_t high_bit;
-//   for (uint64_t j = 0; j < bvsize; j += granularity)
-//   {
-//     high_bit = j + granularity - 1;
-//     // don't let high_bit pass bvsize
-//     if (high_bit >= bvsize)
-//     {
-//       high_bit = bvsize - 1;
-//     }
+  // compare each bit to bvI
+  Node cond;
+  Node bitIAnd;
+  uint64_t high_bit;
+  for (uint64_t j = 0; j < bvsize; j += granularity)
+  {
+    high_bit = j + granularity - 1;
+    // don't let high_bit pass bvsize
+    if (high_bit >= bvsize)
+    {
+      high_bit = bvsize - 1;
+    }
 
-//     // check if the abstraction differs from the concrete one on these bits
-//     if (bvAbsI.extract(high_bit, j) != bvConcI.extract(high_bit, j))
-//     {
-//       bitIAnd = d_iandUtils.createBitwiseIAndNode(x, y, high_bit, j);
-//       // enforce bitwise equality
-//       lem = nm->mkNode(
-//           AND,
-//           lem,
-//           rewrite(d_iandUtils.iextract(high_bit, j, i)).eqNode(bitIAnd));
-//     }
-//   }
-//   return lem;
-// }
+    // check if the abstraction differs from the concrete one on these bits
+    if (bvAbsI.extract(high_bit, j) != bvConcI.extract(high_bit, j))
+    {
+      bitIAnd = d_iandUtils.createBitwiseIAndNode(x, y, high_bit, j);
+      // enforce bitwise equality
+      lem = nm->mkNode(
+          AND,
+          lem,
+          rewrite(d_iandUtils.iextract(high_bit, j, i)).eqNode(bitIAnd));
+    }
+  }
+  return lem;
+}
 
 }  // namespace nl
 }  // namespace arith

@@ -820,6 +820,33 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
 {
    Assert(t.getKind() == kind::PIAND);
    NodeManager* nm = NodeManager::currentNM();
+   // simplifications involving constants
+    for (unsigned i = 1; i < 3; i++)
+    {
+      if (!t[i].isConst())
+      {
+        continue;
+      }
+      if (t[i].getConst<Rational>().sgn() == 0)
+      {
+        // ((_ piand k) 0 y) ---> 0
+        return RewriteResponse(REWRITE_DONE, t[i]);
+      }
+      size_t bsize = std::stoul(t[0].toString());
+      Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
+      Node maxsign = nm->mkConstInt(Rational(Integer(2).pow(bsize) - 1));
+      if (t[i].getConst<Rational>().getNumerator() == maxsign.getConst<Rational>().getNumerator())
+      {
+        // ((_ piand k) 111...1 y) ---> (mod y 2^k)
+        if (i == 1) {
+          Node ret = nm->mkNode(kind::INTS_MODULUS, t[2], twok);
+          return RewriteResponse(REWRITE_AGAIN, ret);
+        } else if (i == 2) {
+          Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+          return RewriteResponse(REWRITE_AGAIN, ret);
+        }
+      }
+    }
     // if constant, we eliminate
     if (t[0].isConst() && t[1].isConst() && t[2].isConst())
     {
@@ -844,26 +871,6 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
       Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
       return RewriteResponse(REWRITE_AGAIN, ret);
     }
-    // simplifications involving constants
-    for (unsigned i = 1; i < 3; i++)
-    {
-      if (!t[i].isConst())
-      {
-        continue;
-      }
-      if (t[i].getConst<Rational>().sgn() == 0)
-      {
-        // ((_ piand k) 0 y) ---> 0
-        return RewriteResponse(REWRITE_DONE, t[i]);
-      }
-      // if (t[i].getConst<Rational>().getNumerator() == Integer(2).pow(bsize) - 1)
-      // {
-      //   // ((_ iand k) 111...1 y) ---> (mod y 2^k)
-      //   Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
-      //   Node ret = nm->mkNode(kind::INTS_MODULUS, t[1 - i], twok);
-      //   return RewriteResponse(REWRITE_AGAIN, ret);
-      // }
-    }
    return RewriteResponse(REWRITE_DONE, t);
 }
 
@@ -880,6 +887,8 @@ RewriteResponse ArithRewriter::postRewritePow2(TNode t)
     if (i < 0)
     {
       return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(0)));
+    } else if (i == 0) {
+      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(1)));
     }
     // (pow2 t) ---> (pow 2 t) and continue rewriting to eliminate pow
     Node two = rewriter::mkConst(Integer(2));

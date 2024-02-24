@@ -87,11 +87,40 @@ void Pow2Solver::checkInitialRefine()
     Node xgeq0 = nm->mkNode(LEQ, d_zero, i[0]);
     Node xltpow2x = nm->mkNode(LT, i[0], i);
     conj.push_back(nm->mkNode(IMPLIES, xgeq0, xltpow2x));
+    // pow2(x) >= 0
+    Node nonegative = nm->mkNode(GEQ, i , d_zero);
+    conj.push_back(nonegative);
+    // pow(2) mod 2 = 0
+    // Node mod2 = nm->mkNode(MOD, i , two);
+    // Node even = nm->mkNode(EQUAL, mod2 , d_zero);
+    // conj.push_back(even)
+
+    // x > 0 -> pow2(x) = 2*pow2(x-1)
+    // Node posit_x = nm->mkNode(LT, i[0], d_zero);
+    // Node x_minus_one = nm->mkNode(MINUS, i[0], d_one); // SUB
+    // Node pow_x_minus_one = nm->mkNode(POW, d_two, x_minus_one);
+    // Node two_times_pow = nm->mkNode(MULT, pow_x_minus_one, d_two);
+    // Node rec_def = nm->mkNode(EQUAL, i, two_times_pow);
+    // conj.push_back(nm->mkNode(IMPLIES, posit_x, rec_def));
+    
+    // x > 2 -> pow2(x) > 2*x ==== x+x
+    // Node xgt2 = nm->mkNode(LT, i[0], d_two);
+    // Node two_times_x = nm->mkNode(MULT, i[0], d_two);
+    // Node low_bound = nm->mkNode(LT, two_times_x, i);
+    // conj.push_back(nm->mkNode(IMPLIES, xgt2, low_bound));
+
+    // x > 2 -> pow2(x) < pow x x ???
+    // Node posit_x = nm->mkNode(LT, i[0], d_two);
+    // Node x_pow_x = nm->mkNode(POW, i[0], i[0]);
+    // Node upper_bound = nm->mkNode(LT, i, x_pow_x);
+    // conj.push_back(nm->mkNode(IMPLIES, posit_x, upper_bound));
+
     Node lem = nm->mkAnd(conj);
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; INIT_REFINE"
                         << std::endl;
     d_im.addPendingLemma(lem, InferenceId::ARITH_NL_POW2_INIT_REFINE);
   }
+  
 }
 
 void Pow2Solver::sortPow2sBasedOnModel()

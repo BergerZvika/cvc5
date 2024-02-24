@@ -390,6 +390,24 @@ name   = "SMT Layer"
   name = "bitwise"
   help = "use bitwise comparisons on binary representation of integer for refinement (experimental)"
 
+  [[option]]
+  name       = "PiandMode"
+  category   = "expert"
+  long       = "piand-mode=mode"
+  type       = "PIandMode"
+  default    = "VALUE"
+  help       = "Set the refinement scheme for parametric integer AND"
+  help_mode  = "Refinement modes for parametric integer AND"
+  [[option.mode.VALUE]]
+  name = "value"
+  help = "value-based refinement"
+  [[option.mode.SUM]]
+  name = "sum"
+  help = "use sum to represent parametric integer AND in refinement"
+  [[option.mode.BITWISE]]
+  name = "bitwise"
+  help = "use bitwise comparisons on binary representation of integer for refinement (experimental)"
+
 [[option]]
   name       = "solveIntAsBV"
   category   = "regular"

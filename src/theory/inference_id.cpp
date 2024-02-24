@@ -96,6 +96,10 @@ const char* toString(InferenceId i)
       return "ARITH_NL_PIAND_INIT_REFINE";
     case InferenceId::ARITH_NL_PIAND_VALUE_REFINE:
       return "ARITH_NL_PIAND_VALUE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_BITWISE_REFINE:
+      return "ARITH_NL_PIAND_BITWISE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_SUM_REFINE:
+      return "ARITH_NL_PIAND_SUM_REFINE";
     case InferenceId::ARITH_NL_POW2_INIT_REFINE:
       return "ARITH_NL_POW2_INIT_REFINE";
     case InferenceId::ARITH_NL_POW2_VALUE_REFINE:
@@ -111,7 +115,7 @@ const char* toString(InferenceId i)
     case InferenceId::ARITH_NL_ICP_PROPAGATION:
       return "ARITH_NL_ICP_PROPAGATION";
     case InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE: return "ARITH_NL_POW2_EVEN_CASE_REFINE";
-    case InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE: "return ARITH_NL_POW2_EXP_LAW_REFINE";
+    case InferenceId::ARITH_NL_POW2_EXP_LAW_REFINE: return "ARITH_NL_POW2_EXP_LAW_REFINE";
 
     case InferenceId::ARRAYS_EXT: return "ARRAYS_EXT";
     case InferenceId::ARRAYS_READ_OVER_WRITE: return "ARRAYS_READ_OVER_WRITE";
