@@ -110,9 +110,6 @@ void PIAndSolver::checkInitialRefine()
       conj.push_back(nm->mkNode(IMPLIES, i[1].eqNode(i[2]), i.eqNode(arg0Mod)));
       // x+y = 2^k-1 => piand(x,y) = 0
       conj.push_back(nm->mkNode(IMPLIES, plus.eqNode(twok_minus_one), i.eqNode(d_zero)));
-      // k > 1 => piand(k x y) = piand (k-1, x mod 2^k-1, y mod 2^k-1) + (2^k-1 * min_k-1_bit) 
-      // TODO:    sumbased lema >=
-      //     bitwise lemma >= k 
       // k <= 0 -> piand (k, x, y) = 0 
       Node nonegative = nm->mkNode(LEQ, k, d_zero);
       Node equal_zero = nm->mkNode(EQUAL, i, d_zero);

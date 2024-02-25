@@ -832,6 +832,10 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
         // ((_ piand k) 0 y) ---> 0
         return RewriteResponse(REWRITE_DONE, t[i]);
       }
+      // std::cout << "1. t: " << t << std::endl;
+      if(!t[0].isConst()) {
+        continue;
+      }
       size_t bsize = std::stoul(t[0].toString());
       Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
       Node maxsign = nm->mkConstInt(Rational(Integer(2).pow(bsize) - 1));
@@ -850,6 +854,7 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     // if constant, we eliminate
     if (t[0].isConst() && t[1].isConst() && t[2].isConst())
     {
+      // std::cout << "2. t: " << t << std::endl;
       size_t bsize = std::stoul(t[0].toString());
       Node iToBvop = nm->mkConst(IntToBitVector(bsize));
       Node arg1 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[1]);
