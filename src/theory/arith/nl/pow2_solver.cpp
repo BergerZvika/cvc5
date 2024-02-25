@@ -90,10 +90,11 @@ void Pow2Solver::checkInitialRefine()
     // pow2(x) >= 0
     Node nonegative = nm->mkNode(GEQ, i , d_zero);
     conj.push_back(nonegative);
-    // pow(2) mod 2 = 0
-    // Node mod2 = nm->mkNode(MOD, i , two);
-    // Node even = nm->mkNode(EQUAL, mod2 , d_zero);
-    // conj.push_back(even)
+    // x>0 -> pow(2) mod 2 = 0
+    Node xgt0 = nm->mkNode(LT, d_zero, i[0]);
+    Node mod2 = nm->mkNode(INTS_MODULUS, i , d_two);
+    Node even = nm->mkNode(EQUAL, mod2 , d_zero);
+    conj.push_back(nm->mkNode(IMPLIES, xgt0, even));
 
     // x > 0 -> pow2(x) = 2*pow2(x-1)
     // Node posit_x = nm->mkNode(LT, i[0], d_zero);
@@ -103,17 +104,18 @@ void Pow2Solver::checkInitialRefine()
     // Node rec_def = nm->mkNode(EQUAL, i, two_times_pow);
     // conj.push_back(nm->mkNode(IMPLIES, posit_x, rec_def));
     
-    // x > 2 -> pow2(x) > 2*x ==== x+x
-    // Node xgt2 = nm->mkNode(LT, i[0], d_two);
-    // Node two_times_x = nm->mkNode(MULT, i[0], d_two);
-    // Node low_bound = nm->mkNode(LT, two_times_x, i);
-    // conj.push_back(nm->mkNode(IMPLIES, xgt2, low_bound));
+    // x > 2 -> pow2(x) > x+x
+    Node xgt2 = nm->mkNode(GT, i[0], d_two);
+    Node two_times_x = nm->mkNode(ADD, i[0], i[0]);
+    Node low_bound = nm->mkNode(LT, two_times_x, i);
+    conj.push_back(nm->mkNode(IMPLIES, xgt2, low_bound));
 
-    // x > 2 -> pow2(x) < pow x x ???
-    // Node posit_x = nm->mkNode(LT, i[0], d_two);
-    // Node x_pow_x = nm->mkNode(POW, i[0], i[0]);
-    // Node upper_bound = nm->mkNode(LT, i, x_pow_x);
-    // conj.push_back(nm->mkNode(IMPLIES, posit_x, upper_bound));
+    // x > 4 -> pow2(x) > x*x
+    Node four = nm->mkConstInt(Rational(4));
+    Node xgt4 = nm->mkNode(GT, i[0], four);
+    Node x_squar = nm->mkNode(MULT, i[0], i[0]);
+    Node low_bound2 = nm->mkNode(LT, x_squar, i);
+    conj.push_back(nm->mkNode(IMPLIES, xgt4, low_bound2));
 
     Node lem = nm->mkAnd(conj);
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; INIT_REFINE"
