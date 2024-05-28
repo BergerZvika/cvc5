@@ -551,7 +551,11 @@ Command* Smt2::setLogic(std::string name, bool fromCommand)
     {
       // integer version of AND
       addIndexedOperator(cvc5::IAND, "iand");
+      // parametric bit-vectors 
       addOperator(cvc5::PIAND, "piand");
+      addOperator(cvc5::PEXTRACT, "pextract");
+      addOperator(cvc5::PARAMETRIC_ZERO_EXTEND, "pzero_extend");
+      addOperator(cvc5::PARAMETRIC_SIGN_EXTEND, "psign_extend");
       // pow2
       addOperator(cvc5::POW2, "int.pow2");
       

@@ -28,6 +28,9 @@ parameterized DIVISIBLE DIVISIBLE_OP 1 "divisibility-by-k predicate; first param
 operator POW 2 "arithmetic power"
 operator POW2 1 "arithmetic power of 2"
 operator PIAND 3 "parametric integer and"
+operator PEXTRACT 3 "parametric extract"
+operator PARAMETRIC_ZERO_EXTEND 2 "parametric zero extend"
+operator PARAMETRIC_SIGN_EXTEND 2 "parametric sign extend"
 
 operator EXPONENTIAL 1 "exponential"
 operator SINE 1 "sine"
@@ -171,6 +174,9 @@ typerule ARCSECANT "SimpleTypeRule<RReal, AReal>"
 typerule ARCCOTANGENT "SimpleTypeRule<RReal, AReal>"
 typerule POW2 "SimpleTypeRule<RInteger, AInteger>"
 typerule PIAND "SimpleTypeRule<RInteger, AInteger, AInteger>"
+typerule PEXTRACT "SimpleTypeRule<RInteger, AInteger, AInteger>"
+typerule PARAMETRIC_ZERO_EXTEND "SimpleTypeRule<RInteger, AInteger>"
+typerule PARAMETRIC_SIGN_EXTEND "SimpleTypeRule<RInteger, AInteger>"
 
 typerule SQRT "SimpleTypeRule<RReal, AReal>"
 

@@ -95,27 +95,20 @@ void Pow2Solver::checkInitialRefine()
     Node mod2 = nm->mkNode(INTS_MODULUS, i , d_two);
     Node even = nm->mkNode(EQUAL, mod2 , d_zero);
     conj.push_back(nm->mkNode(IMPLIES, xgt0, even));
-
-    // x > 0 -> pow2(x) = 2*pow2(x-1)
-    // Node posit_x = nm->mkNode(LT, i[0], d_zero);
-    // Node x_minus_one = nm->mkNode(MINUS, i[0], d_one); // SUB
-    // Node pow_x_minus_one = nm->mkNode(POW, d_two, x_minus_one);
-    // Node two_times_pow = nm->mkNode(MULT, pow_x_minus_one, d_two);
-    // Node rec_def = nm->mkNode(EQUAL, i, two_times_pow);
-    // conj.push_back(nm->mkNode(IMPLIES, posit_x, rec_def));
     
-    // x > 2 -> pow2(x) > x+x
+    // x > 2 -> pow2(x) > x+x+1
     Node xgt2 = nm->mkNode(GT, i[0], d_two);
     Node two_times_x = nm->mkNode(ADD, i[0], i[0]);
-    Node low_bound = nm->mkNode(LT, two_times_x, i);
+    Node two_times_x_plus_one = nm->mkNode(ADD, two_times_x, d_one);
+    Node low_bound = nm->mkNode(LT, two_times_x_plus_one, i);
     conj.push_back(nm->mkNode(IMPLIES, xgt2, low_bound));
 
     // x > 4 -> pow2(x) > x*x
-    Node four = nm->mkConstInt(Rational(4));
-    Node xgt4 = nm->mkNode(GT, i[0], four);
-    Node x_squar = nm->mkNode(MULT, i[0], i[0]);
-    Node low_bound2 = nm->mkNode(LT, x_squar, i);
-    conj.push_back(nm->mkNode(IMPLIES, xgt4, low_bound2));
+    // Node four = nm->mkConstInt(Rational(4));
+    // Node xgt4 = nm->mkNode(GT, i[0], four);
+    // Node x_squar = nm->mkNode(MULT, i[0], i[0]);
+    // Node low_bound2 = nm->mkNode(LT, x_squar, i);
+    // conj.push_back(nm->mkNode(IMPLIES, xgt4, low_bound2));
 
     Node lem = nm->mkAnd(conj);
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; INIT_REFINE"
@@ -198,6 +191,34 @@ void Pow2Solver::checkFullRefine()
     }
 
     // Place holder for additional lemma schemas
+    // assymptotic pow2 lemmas: k > 7 means x > k => pow2(x) > k^2x + k^2
+    // assymptotic pow2 lemmas: k > 5 means x > k => pow2(x) > kx + k^2
+    if (x > 5 && pow2x <= x*x*2)
+        { 
+          Node assumption = nm->mkNode(Kind::GT, n[0], valXConcrete);
+          Node kx = nm->mkNode(Kind::MULT, valXConcrete, n[0]);
+          Node k_squar = nm->mkNode(Kind::MULT, valXConcrete, valXConcrete);
+          Node kx_plus_k_squar = nm->mkNode(Kind::ADD, kx, k_squar);
+          Node conclusion = nm->mkNode(Kind::GT, n, kx_plus_k_squar);
+          Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
+          d_im.addPendingLemma(
+          lem, InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE, nullptr, true);
+    }
+    // assymptotic pow2 lemmas: k > 2 means x > k => pow2(x) > kx + k 
+    // assymptotic pow2 lemmas: k > 2 means x > k+2 => pow2(x) > kx + k^2
+    else if (x > 2 && pow2x <= x*x*2)
+    { 
+      Node x_plus_two = nm->mkNode(Kind::ADD, valXConcrete, d_two);
+      Node assumption = nm->mkNode(Kind::GT, n[0], x_plus_two);
+      Node kx = nm->mkNode(Kind::MULT, valXConcrete, n[0]);
+      Node k_squar = nm->mkNode(Kind::MULT, valXConcrete, valXConcrete);
+      Node kx_plus_k_squar = nm->mkNode(Kind::ADD, kx, k_squar);
+      Node conclusion = nm->mkNode(Kind::GT, n, kx_plus_k_squar);
+      Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
+      d_im.addPendingLemma(
+      lem, InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE, nullptr, true);
+    }
+
 
     // even pow2 lemma: x > 0 -> (pow2(x) - 1) mod 2 = 1
     if (x > 0 && (pow2x - Integer(1)).modByPow2(1) != 1)
@@ -211,7 +232,6 @@ void Pow2Solver::checkFullRefine()
       lem, InferenceId::ARITH_NL_POW2_EVEN_CASE_REFINE, nullptr, true);
     }
 
-    // laws of exponents: 2^x * 2^y = 2^(x+y)
      for (uint64_t j = i + 1; j < size; j++)
     {
       Node m = d_pow2s[j];
@@ -230,7 +250,7 @@ void Pow2Solver::checkFullRefine()
         Integer z = valZConcrete.getConst<Rational>().getNumerator();
         Integer pow2z = valPow2zAbstract.getConst<Rational>().getNumerator();
 
-        
+        // laws of exponents: 2^x * 2^y = 2^(x+y)
         if (x > 0 && y > 0 && x + y == z && pow2x * pow2y != pow2z)
         {
           Node x_plus_y = nm->mkNode(Kind::ADD,n[0], m[0]);

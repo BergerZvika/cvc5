@@ -404,9 +404,36 @@ name   = "SMT Layer"
   [[option.mode.SUM]]
   name = "sum"
   help = "use sum to represent parametric integer AND in refinement"
+  [[option.mode.SUM_GE]]
+  name = "sum_ge"
+  [[option.mode.SUM_EQ]]
+  name = "sum_eq"
+  help = "use sum to represent parametric integer AND in refinement"
   [[option.mode.BITWISE]]
   name = "bitwise"
   help = "use bitwise comparisons on binary representation of integer for refinement (experimental)"
+  [[option.mode.DIFFERENCE]]
+  name = "difference"
+  help = "add difference lemma"
+
+
+  [[option]]
+  name       = "PiandDifference"
+  category   = "regular"
+  long       = "difference-lemmas"
+  type       = "bool"
+  default    = "false"
+  help       = "add difference lemmas to piand"
+  help_mode  = "add difference lemmas to piand"
+
+  [[option]]
+  name       = "PiandSkolem"
+  category   = "regular"
+  long       = "skolem-lemmas"
+  type       = "bool"
+  default    = "false"
+  help       = "add skolem lemmas to piand"
+  help_mode  = "add skolem lemmas to piand"
 
 [[option]]
   name       = "solveIntAsBV"

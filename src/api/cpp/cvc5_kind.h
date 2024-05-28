@@ -541,6 +541,67 @@ enum Kind : int32_t
    *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
    */
   PIAND,
+    /**
+   * Parametric Bit-vector extract.
+   *
+   * - Arity: ``1``
+   *
+   *   - ``1:`` Term of bit-vector Sort
+   *
+   * - Indices Terms: ``2``
+   *
+   *   - ``1:`` The upper bit index.
+   *   - ``2:`` The lower bit index.
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - Solver::mkTerm(const Op&, const std::vector<Term>&) const
+   *
+   * - Create Op of this kind with:
+   *
+   *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
+   */
+  PEXTRACT,
+    /**
+   * Parametric Bit-vector zero extension.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1:`` Term of bit-vector Sort
+   *
+   * - Indices: ``1``
+   *
+   *   - ``1:`` The number of zeroes to extend the given term with.
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - Solver::mkTerm(const Op&, const std::vector<Term>&) const
+   *
+   * - Create Op of this kind with:
+   *
+   *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
+   */
+  PARAMETRIC_ZERO_EXTEND,
+  /**
+   * Parametric Bit-vector sign extension.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1:`` Term of bit-vector Sort
+   *
+   * - Indices: ``1``
+   *
+   *   - ``1:`` The number of bits (of the value of the sign bit) to extend the given term with.
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - Solver::mkTerm(const Op&, const std::vector<Term>&) const
+   *
+   * - Create Op of this kind with:
+   *
+   *   - Solver::mkOp(Kind, const std::vector<uint32_t>&) const
+   */
+  PARAMETRIC_SIGN_EXTEND,
   /**
    * Power of two.
    *

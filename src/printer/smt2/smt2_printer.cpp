@@ -1032,6 +1032,9 @@ std::string Smt2Printer::smtKindString(Kind k, Variant v)
   case kind::NONLINEAR_MULT: return "*";
   case kind::IAND: return "iand";
   case kind::PIAND: return "piand";
+  case kind::PEXTRACT: return "pextract";
+  case kind::PARAMETRIC_ZERO_EXTEND: return "pzero_extend";
+  case kind::PARAMETRIC_SIGN_EXTEND: return "psign_extend";
   case kind::POW2: return "int.pow2";
   case kind::EXPONENTIAL: return "exp";
   case kind::SINE: return "sin";

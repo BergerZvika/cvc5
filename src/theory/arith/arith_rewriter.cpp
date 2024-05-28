@@ -222,6 +222,9 @@ RewriteResponse ArithRewriter::preRewriteTerm(TNode t){
       case kind::NONLINEAR_MULT: return preRewriteMult(t);
       case kind::IAND: return RewriteResponse(REWRITE_DONE, t);
       case kind::PIAND: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PEXTRACT: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PARAMETRIC_ZERO_EXTEND: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PARAMETRIC_SIGN_EXTEND: return RewriteResponse(REWRITE_DONE, t);
       case kind::POW2: return RewriteResponse(REWRITE_DONE, t);
       case kind::EXPONENTIAL:
       case kind::SINE:
@@ -273,6 +276,9 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t){
       case kind::NONLINEAR_MULT: return postRewriteMult(t);
       case kind::IAND: return postRewriteIAnd(t);
       case kind::PIAND: return postRewritePIAnd(t);
+      case kind::PEXTRACT: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PARAMETRIC_ZERO_EXTEND: return RewriteResponse(REWRITE_DONE, t);
+      case kind::PARAMETRIC_SIGN_EXTEND: return RewriteResponse(REWRITE_DONE, t);
       case kind::POW2: return postRewritePow2(t);
       case kind::EXPONENTIAL:
       case kind::SINE:
@@ -830,7 +836,7 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
       if (t[i].getConst<Rational>().sgn() == 0)
       {
         // ((_ piand k) 0 y) ---> 0
-        return RewriteResponse(REWRITE_DONE, t[i]);
+        return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(0)));
       }
       if(!t[0].isConst()) {
         continue;
@@ -874,6 +880,18 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
       Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
       return RewriteResponse(REWRITE_AGAIN, ret);
     }
+    // else if (t[0].isConst())
+    // {
+    //   size_t bsize = std::stoul(t[0].toString());
+    //   if (bsize == 1) {
+    //     Node two = rewriter::mkConst(Integer(2));
+    //     Node xmod2 = nm->mkNode(kind::INTS_MODULUS, t[1], two);
+    //     Node ymod2 = nm->mkNode(kind::INTS_MODULUS, t[2], two);
+    //     Node xlet = nm->mkNode(kind::LEQ, t[1], t[2]);
+    //     Node ite = nm->mkNode(kind::ITE, xlet, xmod2, ymod2);
+    //     return RewriteResponse(REWRITE_AGAIN_FULL, ite);
+    //   }
+    // }
    return RewriteResponse(REWRITE_DONE, t);
 }
 
@@ -892,6 +910,8 @@ RewriteResponse ArithRewriter::postRewritePow2(TNode t)
       return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(0)));
     } else if (i == 0) {
       return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(1)));
+    } else if (i == 1) {
+      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(2)));
     }
     // (pow2 t) ---> (pow 2 t) and continue rewriting to eliminate pow
     Node two = rewriter::mkConst(Integer(2));
