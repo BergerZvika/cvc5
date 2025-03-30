@@ -391,11 +391,11 @@ name   = "SMT Layer"
   help = "use bitwise comparisons on binary representation of integer for refinement (experimental)"
 
   [[option]]
-  name       = "PiandMode"
+  name       = "PiandLemmasMode"
   category   = "expert"
-  long       = "piand-mode=mode"
-  type       = "PIandMode"
-  default    = "VALUE"
+  long       = "piand-lemmas-mode=mode"
+  type       = "PIandLemmasMode"
+  default    = "SUM"
   help       = "Set the refinement scheme for parametric integer AND"
   help_mode  = "Refinement modes for parametric integer AND"
   [[option.mode.VALUE]]
@@ -406,8 +406,8 @@ name   = "SMT Layer"
   help = "use sum to represent parametric integer AND in refinement"
   [[option.mode.SUM_GE]]
   name = "sum_ge"
-  [[option.mode.SUM_EQ]]
-  name = "sum_eq"
+  [[option.mode.SUM_BOTH]]
+  name = "sum_both"
   help = "use sum to represent parametric integer AND in refinement"
   [[option.mode.BITWISE]]
   name = "bitwise"
@@ -416,6 +416,27 @@ name   = "SMT Layer"
   name = "difference"
   help = "add difference lemma"
 
+  [[option]]
+  name       = "PiandMode"
+  category   = "expert"
+  long       = "piand-mode=mode"
+  type       = "PIandMode"
+  default    = "PIAND"
+  help       = "solver piand mode lemmas"
+  help_mode  = "solver piand mode lemmas"
+  [[option.mode.PIAND]]
+  name = "piand"
+  help = "piand solver"
+  [[option.mode.PIAND_OPT]]
+  name = "piand_opt"
+  help = "piand solver optimized by remove mod can be used after translation of pbv formula."
+  [[option.mode.CEGAR]]
+  name = "cegar"
+  help = "piand solver all lemmas in cegar loop"
+  [[option.mode.NO_CEGAR]]
+  name = "no-cegar"
+  help = "piand solver without cegar loop"
+  
 
   [[option]]
   name       = "PiandDifference"

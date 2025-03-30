@@ -1195,6 +1195,7 @@ void TheoryArithPrivate::setupAtom(TNode atom) {
 
   Comparison cmp = Comparison::parseNormalForm(atom);
   Polynomial nvp = cmp.normalizedVariablePart();
+
   Assert(!nvp.isZero());
 
   if(!isSetup(nvp.getNode())){
@@ -1215,6 +1216,7 @@ void TheoryArithPrivate::preRegisterTerm(TNode n) {
     if(isRelationOperator(n.getKind())){
       if(!isSetup(n)){
         setupAtom(n);
+
       }
       ConstraintP c = d_constraintDatabase.lookup(n);
       Assert(c != NullConstraint);
@@ -1329,6 +1331,7 @@ ArithVar TheoryArithPrivate::determineArithVar(TNode assertion) const{
   Trace("determineArithVar") << "determineArithVar " << assertion << endl;
   Comparison cmp = Comparison::parseNormalForm(assertion);
   Polynomial variablePart = cmp.normalizedVariablePart();
+
   return determineArithVar(variablePart);
 }
 
@@ -1471,6 +1474,7 @@ Node TheoryArithPrivate::callDioSolver(){
 
 ConstraintP TheoryArithPrivate::constraintFromFactQueue(TNode assertion)
 {
+
   Kind simpleKind = Comparison::comparisonKind(assertion);
   ConstraintP constraint = d_constraintDatabase.lookup(assertion);
   if(constraint == NullConstraint){
@@ -1948,6 +1952,7 @@ std::pair<ConstraintP, ArithVar> TheoryArithPrivate::replayGetConstraint(const D
   if(cmp.isBoolean()){ return make_pair(NullConstraint, added); }
 
   Polynomial nvp =  cmp.normalizedVariablePart();
+
   if(nvp.isZero()){ return make_pair(NullConstraint, added); }
 
   Node norm = nvp.getNode();

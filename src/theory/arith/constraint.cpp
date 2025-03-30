@@ -1165,8 +1165,8 @@ ConstraintP ConstraintDatabase::addLiteral(TNode literal){
   Comparison posCmp = Comparison::parseNormalForm(atomNode);
 
   ConstraintType posType = Constraint::constraintTypeOfComparison(posCmp);
-
   Polynomial nvp = posCmp.normalizedVariablePart();
+
   ArithVar v = d_avariables.asArithVar(nvp.getNode());
 
   DeltaRational posDR = posCmp.normalizedDeltaRational();

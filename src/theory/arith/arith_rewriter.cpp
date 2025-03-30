@@ -824,9 +824,13 @@ RewriteResponse ArithRewriter::postRewriteIAnd(TNode t)
 
 RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
 {
+  // std::cout << "piand: " << t << std::endl;
    Assert(t.getKind() == kind::PIAND);
    NodeManager* nm = NodeManager::currentNM();
    // simplifications involving constants
+   if(t[0].isConst() && (t[0].getConst<Rational>().sgn() == 0 || t[0].getConst<Rational>().sgn() == -1)) {
+      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(0)));
+   }
     for (unsigned i = 1; i < 3; i++)
     {
       if (!t[i].isConst())
@@ -841,17 +845,20 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
       if(!t[0].isConst()) {
         continue;
       }
-      size_t bsize = std::stoul(t[0].toString());
+      // size_t bsize = std::stoul(t[0].toString());
+      size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
       Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
       Node maxsign = nm->mkConstInt(Rational(Integer(2).pow(bsize) - 1));
       if (t[i].getConst<Rational>().getNumerator() == maxsign.getConst<Rational>().getNumerator())
       {
         // ((_ piand k) 111...1 y) ---> (mod y 2^k)
         if (i == 1) {
-          Node ret = nm->mkNode(kind::INTS_MODULUS, t[2], twok);
+          // Node ret = nm->mkNode(kind::INTS_MODULUS, t[2], twok);
+          Node ret = t[2];
           return RewriteResponse(REWRITE_AGAIN, ret);
         } else if (i == 2) {
-          Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+          // Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+          Node ret = t[1];
           return RewriteResponse(REWRITE_AGAIN, ret);
         }
       }
@@ -859,7 +866,7 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     // if constant, we eliminate
     if (t[0].isConst() && t[1].isConst() && t[2].isConst())
     {
-      size_t bsize = std::stoul(t[0].toString());
+      size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
       Node iToBvop = nm->mkConst(IntToBitVector(bsize));
       Node arg1 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[1]);
       Node arg2 = nm->mkNode(kind::INT_TO_BITVECTOR, iToBvop, t[2]);
@@ -877,21 +884,10 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     {
       // ((_ piand k) x x) ---> (mod x 2^k)
       Node twok = nm->mkNode(kind::POW2, t[0]);
-      Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+      // Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
+      Node ret = t[1];
       return RewriteResponse(REWRITE_AGAIN, ret);
     }
-    // else if (t[0].isConst())
-    // {
-    //   size_t bsize = std::stoul(t[0].toString());
-    //   if (bsize == 1) {
-    //     Node two = rewriter::mkConst(Integer(2));
-    //     Node xmod2 = nm->mkNode(kind::INTS_MODULUS, t[1], two);
-    //     Node ymod2 = nm->mkNode(kind::INTS_MODULUS, t[2], two);
-    //     Node xlet = nm->mkNode(kind::LEQ, t[1], t[2]);
-    //     Node ite = nm->mkNode(kind::ITE, xlet, xmod2, ymod2);
-    //     return RewriteResponse(REWRITE_AGAIN_FULL, ite);
-    //   }
-    // }
    return RewriteResponse(REWRITE_DONE, t);
 }
 
@@ -908,11 +904,7 @@ RewriteResponse ArithRewriter::postRewritePow2(TNode t)
     if (i < 0)
     {
       return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(0)));
-    } else if (i == 0) {
-      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(1)));
-    } else if (i == 1) {
-      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(Integer(2)));
-    }
+    } 
     // (pow2 t) ---> (pow 2 t) and continue rewriting to eliminate pow
     Node two = rewriter::mkConst(Integer(2));
     Node ret = nm->mkNode(kind::POW, two, t[0]);
