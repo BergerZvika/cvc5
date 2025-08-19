@@ -933,6 +933,24 @@ RewriteResponse ArithRewriter::rewriteIntsDivMod(TNode t, bool pre)
   Kind k = t.getKind();
   if (k == Kind::INTS_MODULUS)
   {
+    // New rule: (a + (b mod c)) mod c  →  (a + b) mod c, when c > 0
+    // if (t[0].getKind() == Kind::ADD
+    //     && t[0][1].getKind() == Kind::INTS_MODULUS
+    //     && t[0][1][1].isConst()
+    //     && t[1].isConst()
+    //     && t[0][1][1] == t[1])
+    // {
+    //   Rational c = t[1].getConst<Rational>();
+    //   if (c.sgn() > 0)
+    //   {
+    //     Node a = t[0][0];
+    //     Node b = t[0][1][0];
+    //     Node newSum = nm->mkNode(Kind::ADD, a, b);
+    //     Node ret = nm->mkNode(Kind::INTS_MODULUS, newSum, t[1]);
+    //     return returnRewrite(t, ret, Rewrite::MOD_TOTAL_BY_CONST);
+    //   }
+    // }
+
     if (t[1].isConst() && !t[1].getConst<Rational>().isZero())
     {
       // can immediately replace by INTS_MODULUS_TOTAL

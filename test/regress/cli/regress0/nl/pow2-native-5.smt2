@@ -6,7 +6,7 @@
 (declare-fun x () Int)
 (declare-fun y () Int)
 
-(assert (<= 1 x))
-(assert (distinct 0 (mod (int.pow2 x) 2)))
+(assert (> x 0))
+(assert (< 0 (mod (int.pow2 x) 2)))
 
 (check-sat)

@@ -84,13 +84,12 @@ void Pow2Solver::checkInitialRefine()
     Node xgeq0 = nm->mkNode(Kind::GEQ, i[0], d_zero);
     Node nonegative = nm->mkNode(Kind::GT, i , d_zero);
     conj.push_back(nm->mkNode(Kind::IMPLIES, xgeq0, nonegative));
-    Node lem = nm->mkAnd(conj);
 
     // even: x>0 -> pow2(x) mod 2 = 0
-    Node xgt0 = nm->mkNode(Kind::GT, i[0], d_zero);
     Node mod2 = nm->mkNode(Kind::INTS_MODULUS, i , d_two);
     Node even = nm->mkNode(Kind::EQUAL, mod2 , d_zero);
-    conj.push_back(nm->mkNode(Kind::IMPLIES, xgt0, even));
+    conj.push_back(even);
+    Node lem = nm->mkAnd(conj);
     
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; INIT_REFINE"
                         << std::endl;
