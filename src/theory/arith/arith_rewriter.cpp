@@ -1157,7 +1157,7 @@ RewriteResponse ArithRewriter::postRewriteIAnd(TNode t)
 
 RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
 {
-   Assert(t.getKind() == kind::PIAND);
+   Assert(t.getKind() == Kind::PIAND);
    NodeManager* nm = nodeManager();
    // simplifications involving constants
    if(t[0].isConst() && (t[0].getConst<Rational>().sgn() == 0 || t[0].getConst<Rational>().sgn() == -1)) {
