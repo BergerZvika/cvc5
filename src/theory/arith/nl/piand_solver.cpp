@@ -72,11 +72,10 @@ void PIAndSolver::initLastCall(const std::vector<Node>& assertions,
 
 void PIAndSolver::checkInitialRefine()
 {
-  std::cout << "init" << std::endl;
   Trace("piand-check") << "PIAndSolver::checkInitialRefine" << std::endl;
   NodeManager* nm = nodeManager();
   int index;
-  for (const std::pair<Node, std::vector<Node> >& is : d_piands)
+  for (const std::pair<const Node, std::vector<Node> >& is : d_piands)
   {
     index = -1;
     // the reference bitwidth
@@ -160,7 +159,6 @@ void PIAndSolver::checkInitialRefine()
 
 void PIAndSolver::checkFullRefine()
 {
-  std::cout << "full: " << std::endl;
   NodeManager* nm = nodeManager();
   Trace("piand-check") << "PIAndSolver::checkFullRefine";
   Trace("piand-check") << "PIAND terms: " << std::endl;
