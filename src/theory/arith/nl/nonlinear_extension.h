@@ -31,9 +31,9 @@
 #include "theory/arith/nl/ext/tangent_plane_check.h"
 #include "theory/arith/nl/ext_theory_callback.h"
 #include "theory/arith/nl/iand_solver.h"
-#include "theory/arith/nl/piand_solver.h"
 #include "theory/arith/nl/icp/icp_solver.h"
 #include "theory/arith/nl/nl_model.h"
+#include "theory/arith/nl/piand_solver.h"
 #include "theory/arith/nl/pow2_solver.h"
 #include "theory/arith/nl/stats.h"
 #include "theory/arith/nl/strategy.h"
@@ -45,7 +45,7 @@
 namespace cvc5::internal {
 namespace theory {
 namespace eq {
-  class EqualityEngine;
+class EqualityEngine;
 }
 namespace arith {
 
@@ -250,7 +250,7 @@ class NonlinearExtension : EnvObj
    */
   IAndSolver d_iandSlv;
 
-    /** The parametric integer and solver
+  /** The parametric integer and solver
    *
    * This is the subsolver responsible for running the procedure for
    * constraints involving parametric integer and.

@@ -228,7 +228,7 @@ bool NonlinearExtension::checkModel(const std::vector<Node>& assertions)
   unsigned tdegree = d_trSlv.getTaylorDegree();
   std::vector<NlLemma> lemmas;
   bool ret = d_model.checkModel(passertions, tdegree, lemmas);
-  for (const auto& al: lemmas)
+  for (const auto& al : lemmas)
   {
     d_im.addPendingLemma(al);
   }
@@ -328,9 +328,9 @@ void NonlinearExtension::checkFullEffort(std::map<Node, Node>& arithModel,
   if (res == Result::SAT)
   {
     d_model.reset(arithModel);
-    // Go back and see if we made two shared terms equal that were disequal prior
-    // to modifying the model. If we did so for two terms t and s, then we must
-    // split on t = s.
+    // Go back and see if we made two shared terms equal that were disequal
+    // prior to modifying the model. If we did so for two terms t and s, then we
+    // must split on t = s.
     std::unordered_map<TNode, std::vector<Node>> sharedTermsPost;
     for (TNode st : sts)
     {
@@ -575,9 +575,7 @@ void NonlinearExtension::runStrategy(Theory::Effort effort,
       case InferStep::NL_TANGENT_PLANES_WAITING:
         d_tangentPlaneSlv.check(true);
         break;
-      case InferStep::TRANS_INIT:
-        d_trSlv.initLastCall(xts);
-        break;
+      case InferStep::TRANS_INIT: d_trSlv.initLastCall(xts); break;
       case InferStep::TRANS_INITIAL:
         d_trSlv.checkTranscendentalInitialRefine();
         break;

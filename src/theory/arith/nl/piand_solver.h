@@ -42,7 +42,7 @@ class NlModel;
 class PIAndSolver : protected EnvObj
 {
   using NodeSet = context::CDHashSet<Node>;
-  //typedef context::CDHashSet<Node> NodeSet;
+  // typedef context::CDHashSet<Node> NodeSet;
 
  public:
   PIAndSolver(Env& env, InferenceManager& im, NlModel& model);
