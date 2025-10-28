@@ -58,6 +58,7 @@ NonlinearExtension::NonlinearExtension(Env& env, TheoryArith& containing)
       d_covSlv(d_env, d_im, d_model),
       d_icpSlv(d_env, d_im),
       d_iandSlv(env, d_im, d_model),
+      d_piandSlv(env, d_im, d_model),
       d_pow2Slv(env, d_im, d_model)
 {
   d_extTheory.addFunctionKind(Kind::NONLINEAR_MULT);
@@ -65,6 +66,7 @@ NonlinearExtension::NonlinearExtension(Env& env, TheoryArith& containing)
   d_extTheory.addFunctionKind(Kind::SINE);
   d_extTheory.addFunctionKind(Kind::PI);
   d_extTheory.addFunctionKind(Kind::IAND);
+  d_extTheory.addFunctionKind(Kind::PIAND);
   d_extTheory.addFunctionKind(Kind::POW2);
   d_true = nodeManager()->mkConst(true);
 }
@@ -226,7 +228,7 @@ bool NonlinearExtension::checkModel(const std::vector<Node>& assertions)
   unsigned tdegree = d_trSlv.getTaylorDegree();
   std::vector<NlLemma> lemmas;
   bool ret = d_model.checkModel(passertions, tdegree, lemmas);
-  for (const auto& al: lemmas)
+  for (const auto& al : lemmas)
   {
     d_im.addPendingLemma(al);
   }
@@ -326,9 +328,9 @@ void NonlinearExtension::checkFullEffort(std::map<Node, Node>& arithModel,
   if (res == Result::SAT)
   {
     d_model.reset(arithModel);
-    // Go back and see if we made two shared terms equal that were disequal prior
-    // to modifying the model. If we did so for two terms t and s, then we must
-    // split on t = s.
+    // Go back and see if we made two shared terms equal that were disequal
+    // prior to modifying the model. If we did so for two terms t and s, then we
+    // must split on t = s.
     std::unordered_map<TNode, std::vector<Node>> sharedTermsPost;
     for (TNode st : sts)
     {
@@ -533,6 +535,11 @@ void NonlinearExtension::runStrategy(Theory::Effort effort,
         break;
       case InferStep::IAND_FULL: d_iandSlv.checkFullRefine(); break;
       case InferStep::IAND_INITIAL: d_iandSlv.checkInitialRefine(); break;
+      case InferStep::PIAND_INIT:
+        d_piandSlv.initLastCall(assertions, false_asserts, xts);
+        break;
+      case InferStep::PIAND_FULL: d_piandSlv.checkFullRefine(); break;
+      case InferStep::PIAND_INITIAL: d_piandSlv.checkInitialRefine(); break;
       case InferStep::POW2_INIT:
         d_pow2Slv.initLastCall(assertions, false_asserts, xts);
         break;
@@ -568,9 +575,7 @@ void NonlinearExtension::runStrategy(Theory::Effort effort,
       case InferStep::NL_TANGENT_PLANES_WAITING:
         d_tangentPlaneSlv.check(true);
         break;
-      case InferStep::TRANS_INIT:
-        d_trSlv.initLastCall(xts);
-        break;
+      case InferStep::TRANS_INIT: d_trSlv.initLastCall(xts); break;
       case InferStep::TRANS_INITIAL:
         d_trSlv.checkTranscendentalInitialRefine();
         break;

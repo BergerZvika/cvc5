@@ -108,11 +108,9 @@ struct APIStatistics
 /* Kind                                                                       */
 /* -------------------------------------------------------------------------- */
 
-#define KIND_ENUM(external_name, internal_name)                              \
-  {                                                                          \
-    external_name,                                                           \
-        std::make_pair(internal_name, std::string(#external_name).substr(6)) \
-  }
+#define KIND_ENUM(external_name, internal_name) \
+  {external_name,                               \
+   std::make_pair(internal_name, std::string(#external_name).substr(6))}
 
 /* Mapping from external (API) kind to internal kind. */
 const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
@@ -148,6 +146,7 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
         KIND_ENUM(Kind::ADD, internal::Kind::ADD),
         KIND_ENUM(Kind::MULT, internal::Kind::MULT),
         KIND_ENUM(Kind::IAND, internal::Kind::IAND),
+        KIND_ENUM(Kind::PIAND, internal::Kind::PIAND),
         KIND_ENUM(Kind::POW2, internal::Kind::POW2),
         KIND_ENUM(Kind::SUB, internal::Kind::SUB),
         KIND_ENUM(Kind::NEG, internal::Kind::NEG),
@@ -467,11 +466,9 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
 /* SortKind                                                                   */
 /* -------------------------------------------------------------------------- */
 
-#define SORT_KIND_ENUM(external_name, internal_name)                          \
-  {                                                                           \
-    external_name,                                                            \
-        std::make_pair(internal_name, std::string(#external_name).substr(10)) \
-  }
+#define SORT_KIND_ENUM(external_name, internal_name) \
+  {external_name,                                    \
+   std::make_pair(internal_name, std::string(#external_name).substr(10))}
 
 /* Mapping from external (API) kind to internal kind. */
 const static std::unordered_map<SortKind,
@@ -547,6 +544,7 @@ const static std::unordered_map<internal::Kind,
         {internal::Kind::MULT, Kind::MULT},
         {internal::Kind::NONLINEAR_MULT, Kind::MULT},
         {internal::Kind::IAND, Kind::IAND},
+        {internal::Kind::PIAND, Kind::PIAND},
         {internal::Kind::POW2, Kind::POW2},
         {internal::Kind::SUB, Kind::SUB},
         {internal::Kind::NEG, Kind::NEG},
