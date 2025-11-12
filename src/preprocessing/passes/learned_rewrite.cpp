@@ -293,6 +293,65 @@ Node LearnedRewrite::rewriteLearned(Node nr,
         }
       }
     }
+    Kind den_k = den.getKind();
+    // pow2(e) positive for e >= 0.
+    if (den_k == Kind::POW2) {
+        Node exp = den[0];
+        arith::Bounds exp_db = binfer.get(exp);
+        if (!exp_db.lower_value.isNull() 
+        && exp_db.lower_value.getConst<Rational>().sgn() == 1) {
+          isNonZeroDen = true;
+        }
+    } else if (den_k == Kind::NONLINEAR_MULT || den_k == Kind::INTS_DIVISION ||
+               den_k == Kind::ADD || den_k == Kind::SUB)
+    {
+      Node arg1 = den[0];
+      Node arg2 = den[1];
+      arith::Bounds arg1_db = binfer.get(arg1);
+      arith::Bounds arg2_db = binfer.get(arg2);
+
+      bool arg1_pos = false, arg1_neg = false, arg2_pos = false, arg2_neg = false;
+      if (!arg1_db.lower_value.isNull()) {
+          Rational arg1_low = arg1_db.lower_value.getConst<Rational>();
+          arg1_pos = (arg1_low.sgn() > 0);
+      }
+      if (!arg1_db.upper_value.isNull()) {
+          Rational arg1_up = arg1_db.upper_value.getConst<Rational>();
+          arg1_neg = (arg1_up.sgn() < 0);
+      }
+      if (!arg2_db.lower_value.isNull()) {
+          Rational arg2_low = arg2_db.lower_value.getConst<Rational>();
+          arg2_pos = (arg2_low.sgn() > 0);
+      }
+      if (!arg2_db.upper_value.isNull()) {
+          Rational arg2_up = arg2_db.upper_value.getConst<Rational>();
+          arg2_neg = (arg2_up.sgn() < 0);
+      }
+
+      // --- Case 1: Multiplication or division ---
+      // The denominator is nonzero if both operands are strictly positive or strictly negative.
+      if ((den_k == Kind::NONLINEAR_MULT || den_k == Kind::INTS_DIVISION) &&
+          ( (arg1_pos || arg1_neg) && (arg2_pos || arg2_neg) ))
+      {
+        isNonZeroDen = true;
+      }
+
+      // --- Case 2: Addition ---
+      // The sum is nonzero if both operands are strictly positive or strictly negative.
+      else if (den_k == Kind::ADD)
+      {
+      if ((arg1_pos && arg2_pos) || (arg1_neg && arg2_neg))
+        isNonZeroDen = true;;
+      }
+
+      // --- Case 3: Subtraction ---
+      // The result is nonzero if the operands have different signs.
+      else if (den_k == Kind::SUB)
+      {
+        if ((arg1_pos && arg2_neg) || (arg1_neg && arg2_pos))
+              isNonZeroDen = true;
+      }
+    }
     if (isNonZeroDen)
     {
       Trace("learned-rewrite-rr-debug")
