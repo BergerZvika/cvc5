@@ -15,6 +15,7 @@
 
 # Regression level 0 tests
 set(regress_0_tests
+
   regress0/arith/ackermann.real.smt2
   regress0/arith/arith-eq.smt2
   regress0/arith/arith-min-max-static-learn.smt2
@@ -1152,8 +1153,14 @@ set(regress_0_tests
   regress0/nl/issue9661.smt2
   regress0/nl/lazard-spurious-root.smt2
   regress0/nl/magnitude-wrong-1020-m.smt2
+  regress0/nl/mod_elim_add.smt2
+  regress0/nl/mod_elim_mul.smt2
+  regress0/nl/mod_elim_neg_add.smt2
+  regress0/nl/mod_elim_neg_mul.smt2
+  regress0/nl/mod_elim_pos_neg_mul.smt2
+  regress0/nl/mod_elim_pow2.smt2
   regress0/nl/mult-po.smt2
-  regress0/nl/nia-wrong-tl.smt2
+  regress0/nl/nia-wrong-tl.smt2s
   regress0/nl/nlExtPurify-test.smt2
   regress0/nl/nta/cos-sig-value.smt2
   regress0/nl/nta/dd.mirko_example_01.k5.bound300.smt2
