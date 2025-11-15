@@ -15,7 +15,6 @@
 
 # Regression level 0 tests
 set(regress_0_tests
-
   regress0/arith/ackermann.real.smt2
   regress0/arith/arith-eq.smt2
   regress0/arith/arith-min-max-static-learn.smt2
