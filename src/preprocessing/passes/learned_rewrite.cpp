@@ -302,8 +302,8 @@ Node LearnedRewrite::rewriteLearned(Node nr,
           exp_db.lower_value.getConst<Rational>().sgn() == 1) {
         isNonZeroDen = true;
       }
-    } else if (den_k == Kind::NONLINEAR_MULT || den_k == Kind::ADD ||
-               den_k == Kind::SUB) {
+    } else if (den_k == Kind::NONLINEAR_MULT || den_k == Kind::ADD) {
+      // Rules for nonzero binary operators
       Node arg1 = den[0];
       Node arg2 = den[1];
       arith::Bounds arg1_db = binfer.get(arg1);
