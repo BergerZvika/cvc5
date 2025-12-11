@@ -156,6 +156,12 @@ TypeNode NodeManager::stringType()
                                                  STRING_TYPE);
 }
 
+TypeNode NodeManager::pbvType()
+{
+  return mkConstInternal<TypeNode, TypeConstant>(Kind::TYPE_CONSTANT,
+                                                 PBV_TYPE);
+}
+
 TypeNode NodeManager::regExpType()
 {
   return mkConstInternal<TypeNode, TypeConstant>(Kind::TYPE_CONSTANT,

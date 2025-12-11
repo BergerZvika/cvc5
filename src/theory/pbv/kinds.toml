@@ -1,0 +1,45 @@
+# kinds.toml
+#
+# For documentation on this file format, please refer to
+# src/theory/builtin/kinds.toml.
+#
+
+[theory]
+id                 = "THEORY_PBV"
+base_class         = "::cvc5::internal::theory::pbv::TheoryPbv"
+base_class_header  = "theory/pbv/theory_pbv.h"
+properties         = ["check", "presolve"]
+typechecker_header = "theory/pbv/theory_pbv_type_rules.h"
+
+[rewriter]
+class  = "::cvc5::internal::theory::pbv::TheoryPbvRewriter"
+header = "theory/pbv/theory_pbv_rewriter.h"
+
+[[kinds]]
+type          = "sort"
+name          = "PBV_TYPE"
+cardinality   = "Cardinality::INTEGERS"
+well_founded  = true
+ground-term   = "nm->mkConst(::cvc5::internal::Pbv())"
+header        = "util/pbv.h"
+comment       = "pbv type"
+[kinds.enumerator]
+class  = "::cvc5::internal::theory::pbv::ParametricBitVectorEnumerator"
+header = "theory/pbv/type_enumerator.h"
+
+[[kinds]]
+type      = "constant"
+name      = "CONST_PBV"
+class_key = "class"
+cpp_type  = "Pbv"
+hasher    = "::cvc5::internal::pbv::PbvHashFunction"
+header    = "util/pbv.h"
+comment   = "a pbv value"
+typerule  = "SimpleTypeRule<RPbv>"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_ADD"
+children = "2:"
+comment  = "addition of two or more parametric-bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"

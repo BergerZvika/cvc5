@@ -40,6 +40,10 @@ EvalResult::EvalResult(const EvalResult& other)
       new (&d_bv) BitVector;
       d_bv = other.d_bv;
       break;
+    case PBV:
+      new (&d_pbv) Pbv;
+      d_pbv = other.d_pbv;
+      break;
     case RATIONAL:
       new (&d_rat) Rational;
       d_rat = other.d_rat;
@@ -65,6 +69,10 @@ EvalResult& EvalResult::operator=(const EvalResult& other)
         new (&d_bv) BitVector;
         d_bv = other.d_bv;
         break;
+      case PBV:
+        new (&d_pbv) Pbv;
+        d_pbv = other.d_pbv;
+        break;
       case RATIONAL:
         new (&d_rat) Rational;
         d_rat = other.d_rat;
@@ -87,6 +95,11 @@ EvalResult::~EvalResult()
     case BITVECTOR:
     {
       d_bv.~BitVector();
+      break;
+    }
+    case PBV:
+    {
+      d_pbv.~Pbv();
       break;
     }
     case RATIONAL:
@@ -115,6 +128,7 @@ Node EvalResult::toNode(const TypeNode& tn) const
   {
     case EvalResult::BOOL: return nm->mkConst(d_bool);
     case EvalResult::BITVECTOR: return nm->mkConst(d_bv);
+    case EvalResult::PBV: return nm->mkConst(d_pbv);
     case EvalResult::RATIONAL:
       Assert(!tn.isNull());
       return nm->mkConstRealOrInt(tn, d_rat);
@@ -1196,6 +1210,21 @@ EvalResult Evaluator::evalInternal(
           break;
         }
 
+        case Kind::CONST_PBV:
+          results[currNode] = EvalResult(currNodeVal.getConst<Pbv>());
+          break;
+
+        case Kind::PBV_ADD:
+        {
+          Pbv res = results[currNode[0]].d_pbv;
+          for (size_t i = 1, end = currNode.getNumChildren(); i < end; i++)
+          {
+            res = res + results[currNode[i]].d_pbv;
+          }
+          results[currNode] = EvalResult(res);
+          break;
+        }
+
         case Kind::EQUAL:
         {
           EvalResult lhs = results[currNode[0]];
@@ -1212,6 +1241,12 @@ EvalResult Evaluator::evalInternal(
             case EvalResult::BITVECTOR:
             {
               results[currNode] = EvalResult(lhs.d_bv == rhs.d_bv);
+              break;
+            }
+
+            case EvalResult::PBV:
+            {
+              results[currNode] = EvalResult(lhs.d_pbv == rhs.d_pbv);
               break;
             }
 

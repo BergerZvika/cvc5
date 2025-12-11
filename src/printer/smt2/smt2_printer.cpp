@@ -231,6 +231,7 @@ bool Smt2Printer::toStreamBase(std::ostream& out,
           case REAL_TYPE: out << "Real"; break;
           case INTEGER_TYPE: out << "Int"; break;
           case STRING_TYPE: out << "String"; break;
+          case PBV_TYPE: out << "PBitVec"; break;
           case REGEXP_TYPE: out << "RegLan"; break;
           case ROUNDINGMODE_TYPE: out << "RoundingMode"; break;
           default:
@@ -1289,6 +1290,9 @@ std::string Smt2Printer::smtKindString(Kind k)
     case Kind::BITVECTOR_BIT: return "@bit";
     case Kind::BITVECTOR_SIZE: return "@bvsize";
     case Kind::CONST_BITVECTOR_SYMBOLIC: return "@bv";
+
+    // pbv theory
+    case Kind::PBV_ADD: return "pbvadd";
 
     // datatypes theory
     case Kind::APPLY_TESTER: return "is";

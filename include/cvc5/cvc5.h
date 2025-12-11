@@ -1622,6 +1622,24 @@ class CVC5_EXPORT Term
   std::u32string getU32StringValue() const;
 
   /**
+   * Determine if this term is a Pbv value.
+   * @return True if the term is a Pbv value.
+   */
+  bool isPbvValue() const;
+  /**
+   * Get the native string representation of a Pbv value.
+   * @note Requires that this term is a Pbv value (see isPbvValue()).
+   * @note This is not to be confused with toString(), which returns
+   *       some string representation of the term, whatever data it may hold.
+   * @return The Pbv term as a native Pbv value.
+   * @warning This function is deprecated and replaced by
+   *          Term::getU32StringValue(). It will be removed in a future
+   *          release.
+   */
+  [[deprecated("Use Term::getPbvValue() instead")]] std::string
+  getPbvValue() const;
+
+  /**
    * Determine if this term is a rational value whose numerator fits into an
    * int32 value and its denominator fits into a uint32 value.
    * @return True if the term is a rational and its numerator and denominator
@@ -3858,6 +3876,11 @@ class CVC5_EXPORT TermManager
    */
   Sort getStringSort();
   /**
+   * Get the pbv sort.
+   * @return Sort `pbv`.
+   */
+  Sort getPBVSort();
+  /**
    * Create an array sort.
    * @param indexSort The array index sort.
    * @param elemSort  The array element sort.
@@ -3870,6 +3893,11 @@ class CVC5_EXPORT TermManager
    * @return The bit-vector sort.
    */
   Sort mkBitVectorSort(uint32_t size);
+    /**
+   * Create a parametric bit-vector sort.
+   * @return The parametric bit-vector sort.
+   */
+  Sort mkPBVSort();
   /**
    * Create a floating-point sort.
    * @param exp The bit-width of the exponent of the floating-point sort.
@@ -4738,6 +4766,16 @@ class CVC5_EXPORT Solver
   [[deprecated("Use TermManager::getStringSort() instead")]] Sort
   getStringSort() const;
 
+    /**
+   * Get the pbv sort.
+   * @return Sort pbv.
+   * @warning This function is deprecated and replaced by
+   *          `TermManager::getPBVSort()`. It will be removed in a future
+   *          release.
+   */
+  [[deprecated("Use TermManager::getPBVSort() instead")]] Sort
+  getPBVSort() const;
+
   /**
    * Create an array sort.
    * @param indexSort The array index sort.
@@ -4760,6 +4798,17 @@ class CVC5_EXPORT Solver
    */
   [[deprecated("Use TermManager::mkBitVectorSort() instead")]] Sort
   mkBitVectorSort(uint32_t size) const;
+
+  /**
+   * Create a parametric bit-vector sort.
+   * @return The parametric bit-vector sort.
+   * @warning This function is deprecated and replaced by
+   *          `TermManager::mkPBVSort()`. It will be removed in a future
+   *          release.
+   */
+   [[deprecated("Use TermManager::mkPBVSort() instead")]] Sort
+  mkPBVSort();
+
 
   /**
    * Create a floating-point sort.

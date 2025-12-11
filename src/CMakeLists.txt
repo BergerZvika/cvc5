@@ -680,6 +680,11 @@ libcvc5_add_sources(
   theory/bv/theory_bv_utils.cpp
   theory/bv/theory_bv_utils.h
   theory/bv/type_enumerator.h
+  theory/pbv/theory_pbv.cpp
+  theory/pbv/theory_pbv.h
+  theory/pbv/theory_pbv_rewriter.h
+  theory/pbv/theory_pbv_type_rules.cpp
+  theory/pbv/theory_pbv_type_rules.h
   theory/care_graph.h
   theory/care_pair_argument_callback.cpp
   theory/care_pair_argument_callback.cpp
@@ -1433,6 +1438,7 @@ add_custom_target(gen-options DEPENDS options/options.stamp)
   ${PROJECT_SOURCE_DIR}/src/theory/uf/kinds.toml
   ${PROJECT_SOURCE_DIR}/src/theory/arith/kinds.toml
   ${PROJECT_SOURCE_DIR}/src/theory/bv/kinds.toml
+  ${PROJECT_SOURCE_DIR}/src/theory/pbv/kinds.toml
   ${PROJECT_SOURCE_DIR}/src/theory/ff/kinds.toml
   ${PROJECT_SOURCE_DIR}/src/theory/fp/kinds.toml
   ${PROJECT_SOURCE_DIR}/src/theory/arrays/kinds.toml

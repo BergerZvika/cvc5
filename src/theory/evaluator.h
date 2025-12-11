@@ -27,6 +27,7 @@
 #include "base/output.h"
 #include "expr/node.h"
 #include "util/bitvector.h"
+#include "util/pbv.h"
 #include "util/rational.h"
 #include "util/string.h"
 #include "util/uninterpreted_sort_value.h"
@@ -45,6 +46,7 @@ struct EvalResult
   {
     BOOL,
     BITVECTOR,
+    PBV,
     RATIONAL,
     STRING,
     UVALUE,
@@ -56,6 +58,7 @@ struct EvalResult
   {
     bool d_bool;
     BitVector d_bv;
+    Pbv d_pbv;
     Rational d_rat;
     String d_str;
     UninterpretedSortValue d_av;
@@ -65,6 +68,7 @@ struct EvalResult
   EvalResult() : d_tag(INVALID) {}
   EvalResult(bool b) : d_tag(BOOL), d_bool(b) {}
   EvalResult(const BitVector& bv) : d_tag(BITVECTOR), d_bv(bv) {}
+  EvalResult(const Pbv& pbv) : d_tag(PBV), d_pbv(pbv) {}
   EvalResult(const Rational& i) : d_tag(RATIONAL), d_rat(i) {}
   EvalResult(const String& str) : d_tag(STRING), d_str(str) {}
   EvalResult(const UninterpretedSortValue& av) : d_tag(UVALUE), d_av(av) {}

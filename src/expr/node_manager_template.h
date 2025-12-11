@@ -356,6 +356,9 @@ class NodeManager
   /** Get the (singleton) type for strings. */
   TypeNode stringType();
 
+  /** Get the (singleton) type for pbv. */
+  TypeNode pbvType();
+
   /** Get the (singleton) type for RegExp. */
   TypeNode regExpType();
 
@@ -454,6 +457,7 @@ class NodeManager
 
   /** Make the type of bitvectors of size <code>size</code> */
   TypeNode mkBitVectorType(unsigned size);
+
 
   /** Make the type of finite field elements modulo <code>modulus</code> */
   TypeNode mkFiniteFieldType(const Integer& modulus);

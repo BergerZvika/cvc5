@@ -458,6 +458,9 @@ class CVC5_EXPORT TypeNode
   /** Is this the String type? */
   bool isString() const;
 
+  /** Is this the Pbv type? */
+  bool isPbv() const;
+
   /** Is this a string-like type? (string or sequence) */
   bool isStringLike() const;
 

@@ -75,6 +75,7 @@
 #include "theory/logic_info.h"
 #include "theory/theory_model.h"
 #include "util/bitvector.h"
+#include "util/pbv.h"
 #include "util/divisible.h"
 #include "util/finite_field_value.h"
 #include "util/floatingpoint.h"
@@ -258,6 +259,9 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
         KIND_ENUM(Kind::FINITE_FIELD_MULT, internal::Kind::FINITE_FIELD_MULT),
         KIND_ENUM(Kind::FINITE_FIELD_ADD, internal::Kind::FINITE_FIELD_ADD),
         KIND_ENUM(Kind::FINITE_FIELD_NEG, internal::Kind::FINITE_FIELD_NEG),
+        /* PBV -------------------------------------------------------------- */
+        KIND_ENUM(Kind::CONST_PBV, internal::Kind::CONST_PBV),
+        KIND_ENUM(Kind::PBV_ADD, internal::Kind::PBV_ADD),
         /* FP --------------------------------------------------------------- */
         KIND_ENUM(Kind::CONST_FLOATINGPOINT,
                   internal::Kind::CONST_FLOATINGPOINT),
@@ -508,6 +512,7 @@ const static std::unordered_map<SortKind,
         SORT_KIND_ENUM(SortKind::SEQUENCE_SORT, internal::Kind::SEQUENCE_TYPE),
         SORT_KIND_ENUM(SortKind::SET_SORT, internal::Kind::SET_TYPE),
         SORT_KIND_ENUM(SortKind::STRING_SORT, internal::Kind::TYPE_CONSTANT),
+        SORT_KIND_ENUM(SortKind::PBV_SORT, internal::Kind::TYPE_CONSTANT),
         SORT_KIND_ENUM(SortKind::TUPLE_SORT, internal::Kind::TUPLE_TYPE),
         SORT_KIND_ENUM(SortKind::NULLABLE_SORT, internal::Kind::NULLABLE_TYPE),
         SORT_KIND_ENUM(SortKind::UNINTERPRETED_SORT, internal::Kind::SORT_TYPE),
@@ -656,6 +661,9 @@ const static std::unordered_map<internal::Kind,
         {internal::Kind::BITVECTOR_FROM_BOOLS, Kind::BITVECTOR_FROM_BOOLS},
         {internal::Kind::BITVECTOR_BIT_OP, Kind::BITVECTOR_BIT},
         {internal::Kind::BITVECTOR_BIT, Kind::BITVECTOR_BIT},
+        /* PBV -------------------------------------------------------------- */
+        {internal::Kind::CONST_PBV, Kind::CONST_PBV},
+        {internal::Kind::PBV_ADD, Kind::PBV_ADD},
         /* Finite Fields --------------------------------------------------- */
         {internal::Kind::CONST_FINITE_FIELD, Kind::CONST_FINITE_FIELD},
         {internal::Kind::FINITE_FIELD_BITSUM, Kind::FINITE_FIELD_BITSUM},
@@ -1405,6 +1413,7 @@ SortKind Sort::getKind() const
       case internal::REAL_TYPE: return SortKind::REAL_SORT; break;
       case internal::INTEGER_TYPE: return SortKind::INTEGER_SORT; break;
       case internal::STRING_TYPE: return SortKind::STRING_SORT; break;
+      case internal::PBV_TYPE: return SortKind::PBV_SORT; break;
       case internal::REGEXP_TYPE: return SortKind::REGLAN_SORT; break;
       case internal::ROUNDINGMODE_TYPE:
         return SortKind::ROUNDINGMODE_SORT;
@@ -3174,6 +3183,29 @@ std::u32string Term::getU32StringValue() const
       << "Term to be a string value when calling getU32StringValue()";
   //////// all checks before this line
   return d_node->getConst<internal::String>().toU32String();
+  ////////
+  CVC5_API_TRY_CATCH_END;
+}
+
+bool Term::isPbvValue() const
+{
+  CVC5_API_TRY_CATCH_BEGIN;
+  CVC5_API_CHECK_NOT_NULL;
+  //////// all checks before this line
+  return d_node->getKind() == internal::Kind::CONST_PBV;
+  ////////
+  CVC5_API_TRY_CATCH_END;
+}
+
+std::string Term::getPbvValue() const
+{
+  CVC5_API_TRY_CATCH_BEGIN;
+  CVC5_API_CHECK_NOT_NULL;
+  CVC5_API_ARG_CHECK_EXPECTED(d_node->getKind() == internal::Kind::CONST_PBV,
+                              *d_node)
+      << "Term to be a pbv value when calling getPbvValue()";
+  //////// all checks before this line
+  return d_node->getConst<internal::Pbv>().toString();
   ////////
   CVC5_API_TRY_CATCH_END;
 }
@@ -5730,6 +5762,15 @@ Sort TermManager::getStringSort(void)
   CVC5_API_TRY_CATCH_END;
 }
 
+Sort TermManager::getPBVSort(void)
+{
+  CVC5_API_TRY_CATCH_BEGIN;
+  //////// all checks before this line
+  return Sort(this, d_nm->pbvType());
+  ////////
+  CVC5_API_TRY_CATCH_END;
+}
+
 Sort TermManager::getRoundingModeSort(void)
 {
   CVC5_API_TRY_CATCH_BEGIN;
@@ -6963,6 +7004,8 @@ Sort Solver::getRegExpSort(void) const { return d_tm.getRegExpSort(); }
 
 Sort Solver::getStringSort(void) const { return d_tm.getStringSort(); }
 
+Sort Solver::getPBVSort(void) const { return d_tm.getPBVSort(); }
+
 Sort Solver::getRoundingModeSort(void) const
 {
   return d_tm.getRoundingModeSort();
@@ -6977,6 +7020,7 @@ Sort Solver::mkBitVectorSort(uint32_t size) const
 {
   return d_tm.mkBitVectorSort(size);
 }
+
 
 Sort Solver::mkFiniteFieldSort(const std::string& modulus, uint32_t base) const
 {

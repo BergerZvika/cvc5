@@ -2211,6 +2211,33 @@ enum ENUM(Kind)
    */
   EVALUE(BITVECTOR_BIT),
 
+  /* PBV --------------------------------------------------------------- */
+  /**
+   * Constant pbv.
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkPbv(const std::string&, bool)
+   */
+  EVALUE(CONST_PBV),
+    /**
+   * Addition of two or more parametric bit-vectors.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_ADD),
+
   /* Finite Fields --------------------------------------------------------- */
 
   /**
@@ -6355,6 +6382,14 @@ enum ENUM(SortKind)
    *   - TermManager::getStringSort()
    */
   EVALUE(STRING_SORT),
+  /**
+   * The pbv sort.
+   *
+   * - Create Sort of this Kind with:
+   *
+   *   - TermManager::getPbvSort()
+   */
+  EVALUE(PBV_SORT),
   /**
    * A tuple sort, whose argument sorts denote the sorts of the direct children
    * of the tuple.

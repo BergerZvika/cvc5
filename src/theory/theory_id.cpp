@@ -40,6 +40,7 @@ const char* toString(TheoryId theoryId)
     case THEORY_UF: return "THEORY_UF"; break;
     case THEORY_ARITH: return "THEORY_ARITH"; break;
     case THEORY_BV: return "THEORY_BV"; break;
+    case THEORY_PBV: return "THEORY_PBV"; break;
     case THEORY_FF: return "THEORY_FF"; break;
     case THEORY_FP: return "THEORY_FP"; break;
     case THEORY_ARRAYS: return "THEORY_ARRAYS"; break;
@@ -70,6 +71,7 @@ std::string getStatsPrefix(TheoryId theoryId)
     case THEORY_UF: return "theory::uf::"; break;
     case THEORY_ARITH: return "theory::arith::"; break;
     case THEORY_BV: return "theory::bv::"; break;
+    case THEORY_PBV: return "theory::pbv::"; break;
     case THEORY_FF: return "theory::ff::"; break;
     case THEORY_FP: return "theory::fp::"; break;
     case THEORY_ARRAYS: return "theory::arrays::"; break;

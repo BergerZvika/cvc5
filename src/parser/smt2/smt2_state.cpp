@@ -133,6 +133,11 @@ void Smt2State::addBitvectorOperators()
   addIndexedOperator(Kind::BITVECTOR_ROTATE_RIGHT, "rotate_right");
 }
 
+void Smt2State::addParametricBitvectorOperators()
+{
+  addOperator(Kind::PBV_ADD, "pbvadd");
+}
+
 void Smt2State::addFiniteFieldOperators()
 {
   addOperator(cvc5::Kind::FINITE_FIELD_ADD, "ff.add");
@@ -880,6 +885,29 @@ void Smt2State::setLogic(std::string name)
       addOperator(Kind::BITVECTOR_SBV_TO_INT, "sbv_to_int");
     }
   }
+
+    if (d_logic.isTheoryEnabled(internal::theory::THEORY_PBV)) {
+      defineType("PBitVec", d_tm.getPBVSort(), false);
+      addParametricBitvectorOperators();
+
+      if (d_logic.isTheoryEnabled(internal::theory::THEORY_ARITH)
+          && d_logic.areIntegersUsed())
+      {
+        // Conversions between bit-vectors and integers
+        if (!strictModeEnabled())
+        {
+          // For the sake of backwards compatability at the moment we support
+          // the old syntax, which in the case of bv2nat maps directly to
+          // Kind::BITVECTOR_UBV_TO_INT.
+          // addOperator(Kind::BITVECTOR_UBV_TO_INT, "bv2nat");
+          // addIndexedOperator(Kind::INT_TO_BITVECTOR, "int2bv");
+        }
+        // addIndexedOperator(Kind::INT_TO_BITVECTOR, "int_to_bv");
+        // addOperator(Kind::BITVECTOR_UBV_TO_INT, "ubv_to_int");
+        // addOperator(Kind::BITVECTOR_SBV_TO_INT, "sbv_to_int");
+      }
+    }
+
 
   if (d_logic.isTheoryEnabled(internal::theory::THEORY_DATATYPES))
   {

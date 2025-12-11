@@ -109,7 +109,8 @@ CardinalityClass TypeNode::getCardinalityClass()
   {
     ret = CardinalityClass::FINITE;
   }
-  else if (isString() || isRegExp() || isSequence() || isRealOrInt() || isBag())
+  else if (isString() || isRegExp() || isSequence() || isRealOrInt() || isBag()
+          || isPbv())
   {
     ret = CardinalityClass::INFINITE;
   }
@@ -213,6 +214,12 @@ bool TypeNode::isString() const {
   return getKind() == Kind::TYPE_CONSTANT
          && getConst<TypeConstant>() == STRING_TYPE;
 }
+
+bool TypeNode::isPbv() const {
+  return getKind() == Kind::TYPE_CONSTANT
+         && getConst<TypeConstant>() == PBV_TYPE;
+}
+
 
 /** Is this a regexp type */
 bool TypeNode::isRegExp() const {

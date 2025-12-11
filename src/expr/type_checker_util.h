@@ -65,6 +65,13 @@ struct RString
   static TypeNode mkType(NodeManager* nm) { return nm->stringType(); }
 };
 
+/** Type check returns the pbv sort */
+struct RPbv
+{
+  static TypeNode mkType(NodeManager* nm) { return nm->pbvType(); }
+};
+
+
 /** Argument does not exist */
 struct ANone
 {
@@ -143,6 +150,17 @@ struct AString
     return t.isString() || t.isFullyAbstract();
   }
   constexpr static const char* typeName = "string";
+};
+
+/** Argument is a pbv */
+struct APbv
+{
+  static bool checkArg(TNode n, size_t arg)
+  {
+    TypeNode t = n[arg].getTypeOrNull();
+    return t.isPbv() || t.isFullyAbstract();
+  }
+  constexpr static const char* typeName = "pbv";
 };
 
 /** 

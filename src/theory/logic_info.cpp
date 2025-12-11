@@ -311,6 +311,10 @@ std::string LogicInfo::getLogicString() const {
         ss << "BV";
         ++seen;
       }
+      if(d_theories[THEORY_PBV]) {
+        ss << "PBV";
+        ++seen;
+      }
       if (d_theories[THEORY_FF])
       {
         ss << "FF";
@@ -494,6 +498,13 @@ void LogicInfo::setLogicString(std::string logicString)
           checkDuplicateTheory(THEORY_BV, "BV");
           enableTheory(THEORY_BV);
           p += 2;
+        }
+        else if (!strncmp(p, "PBV", 3))
+        {
+          checkDuplicateTheory(THEORY_PBV, "PBV");
+          enableTheory(THEORY_PBV);
+          enableIntegers();
+          p += 3;
         }
         else if (!strncmp(p, "FF", 2))
         {

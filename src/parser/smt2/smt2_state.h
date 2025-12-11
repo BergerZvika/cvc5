@@ -447,6 +447,8 @@ class Smt2State : public ParserState
 
   void addBitvectorOperators();
 
+  void addParametricBitvectorOperators();
+
   void addFiniteFieldOperators();
 
   void addDatatypesOperators();
