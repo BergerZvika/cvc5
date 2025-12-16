@@ -1292,7 +1292,33 @@ std::string Smt2Printer::smtKindString(Kind k)
     case Kind::CONST_BITVECTOR_SYMBOLIC: return "@bv";
 
     // pbv theory
+    case Kind::PBV_AND: return "pbvand";
+    case Kind::PBV_OR: return "pbvor";
+    case Kind::PBV_XOR: return "pbvxor";
+    case Kind::PBV_NOT: return "pbvnot";
+    case Kind::PBV_ASHR: return "pbvashr";
+    case Kind::PBV_LSHR: return "pbvlshr";
+    case Kind::PBV_SHL: return "pbvshl";
     case Kind::PBV_ADD: return "pbvadd";
+    case Kind::PBV_SUB: return "pbvsub";
+    case Kind::PBV_MULT: return "pbvmul";
+    case Kind::PBV_UDIV: return "pbvudiv";
+    case Kind::PBV_UREM: return "pbvurem";
+    case Kind::PBV_NEG: return "pbvneg";
+    case Kind::PBV_CONCAT: return "pconcat";
+    case Kind::PBV_EXTRACT: return "pextract";
+    case Kind::PBV_SIGN_EXTEND: return "psign_extend";
+    case Kind::PBV_ZERO_EXTEND: return "pzero_extend";
+    case Kind::PBV_SGE: return "pbvsge";
+    case Kind::PBV_SGT: return "pbvsgt";
+    case Kind::PBV_SLE: return "pbvsle";
+    case Kind::PBV_SLT: return "pbvslt";
+    case Kind::PBV_UGE: return "pbvuge";
+    case Kind::PBV_UGT: return "pbvugt";
+    case Kind::PBV_ULT: return "pbvult";
+    case Kind::PBV_ULE: return "pbvule";
+    case Kind::PBV_SIZE: return "pbvsize";
+    case Kind::INT_TO_PBV: return "int_to_pbv";
 
     // datatypes theory
     case Kind::APPLY_TESTER: return "is";

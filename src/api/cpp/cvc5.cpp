@@ -260,8 +260,34 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
         KIND_ENUM(Kind::FINITE_FIELD_ADD, internal::Kind::FINITE_FIELD_ADD),
         KIND_ENUM(Kind::FINITE_FIELD_NEG, internal::Kind::FINITE_FIELD_NEG),
         /* PBV -------------------------------------------------------------- */
-        KIND_ENUM(Kind::CONST_PBV, internal::Kind::CONST_PBV),
+        // KIND_ENUM(Kind::CONST_PBV, internal::Kind::CONST_PBV),
+        KIND_ENUM(Kind::PBV_AND, internal::Kind::PBV_AND),
+        KIND_ENUM(Kind::PBV_OR, internal::Kind::PBV_OR),
+        KIND_ENUM(Kind::PBV_XOR, internal::Kind::PBV_XOR),
+        KIND_ENUM(Kind::PBV_NOT, internal::Kind::PBV_NOT),
+        KIND_ENUM(Kind::PBV_ASHR, internal::Kind::PBV_ASHR),
+        KIND_ENUM(Kind::PBV_LSHR, internal::Kind::PBV_LSHR),
+        KIND_ENUM(Kind::PBV_SHL, internal::Kind::PBV_SHL),
         KIND_ENUM(Kind::PBV_ADD, internal::Kind::PBV_ADD),
+        KIND_ENUM(Kind::PBV_SUB, internal::Kind::PBV_SUB),
+        KIND_ENUM(Kind::PBV_MULT, internal::Kind::PBV_MULT),
+        KIND_ENUM(Kind::PBV_UDIV, internal::Kind::PBV_UDIV),
+        KIND_ENUM(Kind::PBV_UREM, internal::Kind::PBV_UREM),
+        KIND_ENUM(Kind::PBV_NEG, internal::Kind::PBV_NEG),
+        KIND_ENUM(Kind::PBV_CONCAT, internal::Kind::PBV_CONCAT),
+        KIND_ENUM(Kind::PBV_EXTRACT, internal::Kind::PBV_EXTRACT),
+        KIND_ENUM(Kind::PBV_SIGN_EXTEND, internal::Kind::PBV_SIGN_EXTEND),
+        KIND_ENUM(Kind::PBV_ZERO_EXTEND, internal::Kind::PBV_ZERO_EXTEND),
+        KIND_ENUM(Kind::PBV_SGE, internal::Kind::PBV_SGE),
+        KIND_ENUM(Kind::PBV_SGT, internal::Kind::PBV_SGT),
+        KIND_ENUM(Kind::PBV_SLE, internal::Kind::PBV_SLE),
+        KIND_ENUM(Kind::PBV_SLT, internal::Kind::PBV_SLT),
+        KIND_ENUM(Kind::PBV_UGE, internal::Kind::PBV_UGE),
+        KIND_ENUM(Kind::PBV_UGT, internal::Kind::PBV_UGT),
+        KIND_ENUM(Kind::PBV_ULT, internal::Kind::PBV_ULT),
+        KIND_ENUM(Kind::PBV_ULE, internal::Kind::PBV_ULE),
+        KIND_ENUM(Kind::PBV_SIZE, internal::Kind::PBV_SIZE),
+        KIND_ENUM(Kind::INT_TO_PBV, internal::Kind::INT_TO_PBV),
         /* FP --------------------------------------------------------------- */
         KIND_ENUM(Kind::CONST_FLOATINGPOINT,
                   internal::Kind::CONST_FLOATINGPOINT),
@@ -662,8 +688,34 @@ const static std::unordered_map<internal::Kind,
         {internal::Kind::BITVECTOR_BIT_OP, Kind::BITVECTOR_BIT},
         {internal::Kind::BITVECTOR_BIT, Kind::BITVECTOR_BIT},
         /* PBV -------------------------------------------------------------- */
-        {internal::Kind::CONST_PBV, Kind::CONST_PBV},
+        // {internal::Kind::CONST_PBV, Kind::CONST_PBV},
+        {internal::Kind::PBV_AND, Kind::PBV_AND},
+        {internal::Kind::PBV_OR, Kind::PBV_OR},
+        {internal::Kind::PBV_XOR, Kind::PBV_XOR},
+        {internal::Kind::PBV_NOT, Kind::PBV_NOT},
+        {internal::Kind::PBV_ASHR, Kind::PBV_ASHR},
+        {internal::Kind::PBV_LSHR, Kind::PBV_LSHR},
+        {internal::Kind::PBV_SHL, Kind::PBV_SHL},
         {internal::Kind::PBV_ADD, Kind::PBV_ADD},
+        {internal::Kind::PBV_SUB, Kind::PBV_SUB},
+        {internal::Kind::PBV_MULT, Kind::PBV_MULT},
+        {internal::Kind::PBV_UDIV, Kind::PBV_UDIV},
+        {internal::Kind::PBV_UREM, Kind::PBV_UREM},
+        {internal::Kind::PBV_NEG, Kind::PBV_NEG},
+        {internal::Kind::PBV_CONCAT, Kind::PBV_CONCAT},
+        {internal::Kind::PBV_EXTRACT, Kind::PBV_EXTRACT},
+        {internal::Kind::PBV_SIGN_EXTEND, Kind::PBV_SIGN_EXTEND},
+        {internal::Kind::PBV_ZERO_EXTEND, Kind::PBV_ZERO_EXTEND},
+        {internal::Kind::PBV_SGE, Kind::PBV_SGE},
+        {internal::Kind::PBV_SGT, Kind::PBV_SGT},
+        {internal::Kind::PBV_SLE, Kind::PBV_SLE},
+        {internal::Kind::PBV_SLT, Kind::PBV_SLT},
+        {internal::Kind::PBV_UGE, Kind::PBV_UGE},
+        {internal::Kind::PBV_UGT, Kind::PBV_UGT},
+        {internal::Kind::PBV_ULT, Kind::PBV_ULT},
+        {internal::Kind::PBV_ULE, Kind::PBV_ULE},
+        {internal::Kind::PBV_SIZE, Kind::PBV_SIZE},
+        {internal::Kind::INT_TO_PBV, Kind::INT_TO_PBV},
         /* Finite Fields --------------------------------------------------- */
         {internal::Kind::CONST_FINITE_FIELD, Kind::CONST_FINITE_FIELD},
         {internal::Kind::FINITE_FIELD_BITSUM, Kind::FINITE_FIELD_BITSUM},
@@ -3187,28 +3239,30 @@ std::u32string Term::getU32StringValue() const
   CVC5_API_TRY_CATCH_END;
 }
 
-bool Term::isPbvValue() const
-{
-  CVC5_API_TRY_CATCH_BEGIN;
-  CVC5_API_CHECK_NOT_NULL;
-  //////// all checks before this line
-  return d_node->getKind() == internal::Kind::CONST_PBV;
-  ////////
-  CVC5_API_TRY_CATCH_END;
-}
+// bool Term::isPbvValue() const
+// {
+//   CVC5_API_TRY_CATCH_BEGIN;
+//   CVC5_API_CHECK_NOT_NULL;
+//   //////// all checks before this line
+//   return d_node->getKind() == internal::Kind::CONST_PBV;
+//   ////////
+//   CVC5_API_TRY_CATCH_END;
+// }
 
-std::string Term::getPbvValue() const
-{
-  CVC5_API_TRY_CATCH_BEGIN;
-  CVC5_API_CHECK_NOT_NULL;
-  CVC5_API_ARG_CHECK_EXPECTED(d_node->getKind() == internal::Kind::CONST_PBV,
-                              *d_node)
-      << "Term to be a pbv value when calling getPbvValue()";
-  //////// all checks before this line
-  return d_node->getConst<internal::Pbv>().toString();
-  ////////
-  CVC5_API_TRY_CATCH_END;
-}
+// std::string Term::getPbvValue() const
+// {
+//   CVC5_API_TRY_CATCH_BEGIN;
+//   CVC5_API_CHECK_NOT_NULL;
+//   CVC5_API_ARG_CHECK_EXPECTED(d_node->getKind() == internal::Kind::CONST_PBV,
+//                               *d_node)
+                              
+//       << "Term to be a pbv value when calling getPbvValue()";
+//   //////// all checks before this line
+//   // return d_node->getConst<internal::Pbv>().toString();
+//   return d_node->getConst<internal::BitVector>().toString();
+//   ////////
+//   CVC5_API_TRY_CATCH_END;
+// }
 
 std::vector<internal::Node> Term::termVectorToNodes(
     const std::vector<Term>& terms)

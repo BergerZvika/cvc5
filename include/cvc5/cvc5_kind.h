@@ -2219,8 +2219,127 @@ enum ENUM(Kind)
    *
    *   - TermManager::mkPbv(const std::string&, bool)
    */
-  EVALUE(CONST_PBV),
+  // EVALUE(CONST_PBV),
     /**
+   * Parametric Bit-wise and.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_AND),
+  /**
+   * Parametric Bit-wise or.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_OR),
+  /**
+   * Parametric Bit-wise xor.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_XOR),
+   /**
+   * Parametric Bit-wise not.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_NOT),
+  /**
+   * Parametric Bit-vector shift left.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SHL),
+  /**
+   * Parametric Bit-vector logical shift right.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_LSHR),
+  /**
+   * Parametric Bit-vector arithmetic shift right.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_ASHR),
+  /**
    * Addition of two or more parametric bit-vectors.
    *
    * - Arity: ``n > 1``
@@ -2237,6 +2356,337 @@ enum ENUM(Kind)
    *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
    */
   EVALUE(PBV_ADD),
+    /**
+   * Subtraction of two parametric bit-vectors.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SUB),
+  /**
+   * Multiplication of two or more parametric bit-vectors.
+   *
+   * - Arity: ``n > 1``
+   *
+   *   - ``1..n:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_MULT),
+  /**
+   * Unsigned parametric bit-vector division.
+   *
+   * Truncates towards ``0``. If the divisor is zero, the result is all ones.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_UDIV),
+  /**
+   * Unsigned parametric bit-vector remainder.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_UREM),
+   /**
+   * unary negation of a parametric bit-vector remainder.
+   *
+   *
+   * - Arity: ``1``
+   *
+   *   - ``1:`` Term of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_NEG),
+   /**
+   * concatenation for a parametric bit-vectors.
+   *
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_CONCAT),
+  /**
+   * extraction for a parametric bit-vectors.
+   *
+   * - Arity: ``3``
+   *
+   *   - ``1:`` Terms of pbv Sort (sorts must match)
+   *   - ``2..3:`` Terms of Int Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_EXTRACT),
+  /**
+   * sign extend for a parametric bit-vectors.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1:`` Term of Int Sort (sorts must match)
+   *   - ``2:`` Term of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SIGN_EXTEND),
+  /**
+   * sign zero for a parametric bit-vectors.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1:`` Term of Int Sort (sorts must match)
+   *   - ``2:`` Term of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_ZERO_EXTEND),
+   /**
+   * Bit-vector signed greater than or equal.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SGE),
+   /**
+   * Bit-vector signed greater than.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SGT),
+   /**
+   * Bit-vector signed less than or equal.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SLE),
+   /**
+   * Bit-vector signed less than.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SLT),
+   /**
+   * Bit-vector unsigned greater than or equal.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_UGE),
+   /**
+   * Bit-vector unsigned greater than.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_UGT),
+   /**
+   * Bit-vector unsigned less than.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_ULT),
+   /**
+   * Bit-vector unsigned less than or equal.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_ULE),
+  /**
+   * size of parametric bitvector.
+   *
+   * - Arity: ``1``
+   *
+   *   - ``1:`` Term of pbv Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(PBV_SIZE),
+  /**
+   * integer to parametric bitvector
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1..2:`` Terms of Int Sort (sorts must match)
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(INT_TO_PBV),
+
 
   /* Finite Fields --------------------------------------------------------- */
 

@@ -1210,9 +1210,12 @@ EvalResult Evaluator::evalInternal(
           break;
         }
 
-        case Kind::CONST_PBV:
-          results[currNode] = EvalResult(currNodeVal.getConst<Pbv>());
-          break;
+        // case Kind::CONST_PBV:
+        // {
+        //   // results[currNode] = EvalResult(currNodeVal.getConst<Pbv>());
+        //   results[currNode] = EvalResult(currNodeVal.getConst<BitVector>());
+        //   break;
+        // }
 
         case Kind::PBV_ADD:
         {

@@ -27,19 +27,220 @@ comment       = "pbv type"
 class  = "::cvc5::internal::theory::pbv::ParametricBitVectorEnumerator"
 header = "theory/pbv/type_enumerator.h"
 
-[[kinds]]
-type      = "constant"
-name      = "CONST_PBV"
-class_key = "class"
-cpp_type  = "Pbv"
-hasher    = "::cvc5::internal::pbv::PbvHashFunction"
-header    = "util/pbv.h"
-comment   = "a pbv value"
-typerule  = "SimpleTypeRule<RPbv>"
+# [[kinds]]
+# type      = "constant"
+# name      = "CONST_PBV"
+# class_key = "class"
+# cpp_type  = "Pbv"
+# hasher    = "::cvc5::internal::pbv::PbvHashFunction"
+# header    = "util/pbv.h"
+# comment   = "a pbv value"
+# typerule  = "SimpleTypeRule<RPbv>"
 
+# [[kinds]]
+# type      = "constant"
+# name      = "CONST_PBV"
+# class_key = "class"
+# cpp_type  = "BitVector"
+# hasher    = "::cvc5::internal::BitVectorHashFunction"
+# header    = "util/bitvector.h"
+# comment   = "a parametric width bit-vector constant; payload is an instance of the cvc5::internal::BitVector class"
+# typerule  = "::cvc5::internal::theory::bv::BitVectorConstantTypeRule"
+
+## bit-wise kinds
+[[kinds]]
+type     = "operator"
+name     = "PBV_AND"
+children = "2:"
+comment  = "bitwise and of two or more parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_OR"
+children = "2:"
+comment  = "bitwise or of two or more parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_XOR"
+children = "2:"
+comment  = "bitwise xor of two or more parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_NOT"
+children = 1
+comment  = "bitwise not of a parametric bit-vector"
+typerule  = "SimpleTypeRule<RPbv, APbv>"
+
+## shift kinds
+[[kinds]]
+type     = "operator"
+name     = "PBV_ASHR"
+children = 2
+comment  = "parametric bit-vector arithmetic shift right (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_LSHR"
+children = 2
+comment  = "parametric bit-vector logical shift right (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SHL"
+children = 2
+comment  = "parametric bit-vector shift left (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+## arithmetic kinds
 [[kinds]]
 type     = "operator"
 name     = "PBV_ADD"
 children = "2:"
-comment  = "addition of two or more parametric-bit-vectors"
+comment  = "addition of two or more parametric bit-vectors"
 typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SUB"
+children = 2
+comment  = "subtraction of two parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_MULT"
+children = "2:"
+comment  = "multiplication of two or more parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_UDIV"
+children = 2
+comment  = "unsigned division of two parametric bit-vectors, truncating towards 0 (defined to be the all-ones bit pattern, if divisor is 0)"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_UREM"
+children = 2
+comment  = "unsigned remainder from truncating division of two parametric bit-vectors (defined to be equal to the dividend, if divisor is 0)"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_NEG"
+children = 1
+comment  = "unary negation of a parametric bit-vector"
+typerule  = "SimpleTypeRule<RPbv, APbv>"
+
+
+## concatenation kind
+[[kinds]]
+type     = "operator"
+name     = "PBV_CONCAT"
+children = "2:"
+comment  = "concatenation of two or more parametric bit-vectors"
+typerule = "::cvc5::internal::theory::pbv::PbvTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_EXTRACT"
+children = 3
+comment  = "parametric bit-vector extract"
+typerule = "SimpleTypeRule<RPbv, APbv, AInteger, AInteger>"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SIGN_EXTEND"
+children = 2
+comment  = "poperator for the parametric bit-vector sign-extend"
+typerule = "SimpleTypeRule<RPbv, AInteger, APbv>"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_ZERO_EXTEND"
+children = 2
+comment  = "poperator for the parametric bit-vector zero-extend"
+typerule = "SimpleTypeRule<RPbv, AInteger, APbv>"
+
+## inequality kinds
+[[kinds]]
+type     = "operator"
+name     = "PBV_SGE"
+children = 2
+comment  = "parametric bit-vector signed greater than or equal (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SGT"
+children = 2
+comment  = "parametric bit-vector signed greater than (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SLE"
+children = 2
+comment  = "parametric bit-vector signed less than or equal (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_SLT"
+children = 2
+comment  = "parametric bit-vector signed less than (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_UGE"
+children = 2
+comment  = "parametric bit-vector unsigned greater than or equal (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_UGT"
+children = 2
+comment  = "parametric bit-vector unsigned greater than (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_ULT"
+children = 2
+comment  = "parametric bit-vector unsigned less than (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+[[kinds]]
+type     = "operator"
+name     = "PBV_ULE"
+children = 2
+comment  = "parametric bit-vector unsigned less than or equal (the two parametric bit-vector parameters must have same width)"
+typerule = "::cvc5::internal::theory::pbv::PbvPredicateTypeRule"
+
+## size
+[[kinds]]
+type     = "operator"
+name     = "PBV_SIZE"
+children = 1
+comment  = "Size of parametric bitvector"
+typerule  = "SimpleTypeRule<RInteger, APbv>"
+
+## int to pbv
+## size
+[[kinds]]
+type     = "operator"
+name     = "INT_TO_PBV"
+children = 2
+comment  = "transform two integer to parametric bitvector; the first integer is the width and the second is the value."
+typerule  = "SimpleTypeRule<RPbv, AInteger, AInteger>"

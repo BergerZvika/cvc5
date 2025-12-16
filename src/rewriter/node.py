@@ -101,7 +101,33 @@ class Op(Enum):
     ###########################################################################
     # Parametric Bit-vectors
     ###########################################################################
+    PBVAND = ('pbvand', 'PBV_AND')
+    PBVOR = ('pbvor', 'PBV_OR')
+    PBVXOR = ('pbvxor', 'PBV_XOR')
+    PBVNOT = ('pbvnot', 'PBV_NOT')
+    PBVASHR = ('pbvashr', 'PBV_ASHR')
+    PBVLSHR = ('pbvlshr', 'PBV_LSHR')
+    PBVSHL = ('pbvshl', 'PBV_SHL')
     PBVADD = ('pbvadd', 'PBV_ADD')
+    PBVSUB = ('pbvsub', 'PBV_SUB')
+    PBVMULT = ('pbvmul', 'PBV_MULT')
+    PBVUDIV = ('pbvudiv', 'PBV_UDIV')
+    PBVUREM = ('pbvurem', 'PBV_UREM')
+    PBVUREM = ('pbvneg', 'PBV_NEG')
+    PBVCONCAT = ('pconcat', 'PBV_CONCAT')
+    PBVEXTRACT = ('pextract', 'PBV_EXTRACT')
+    PBVSIGNEXTEND = ('psign_extend', 'PBV_SIGN_EXTEND')
+    PBVZEROEXTEND = ('pzero_extend', 'PBV_ZERO_EXTEND')
+    PBVSGE = ('pbvsge', 'PBV_SGE')
+    PBVSGT = ('pbvsgt', 'PBV_SGT')
+    PBVSLE = ('pbvsle', 'PBV_SLE')
+    PBVSLT = ('pbvslt', 'PBV_SLT')
+    PBVUGE = ('pbvuge', 'PBV_UGE')
+    PBVUGT = ('pbvugt', 'PBV_UGT')
+    PBVULT = ('pbvult', 'PBV_ULT')
+    PBVULE = ('pbvule', 'PBV_ULE')
+    PBVSIZE = ('pbvsize', 'PBV_SIZE')
+    INTTOPBV = ('int_to_pbv', 'INT_TO_PBV')
 
     ###########################################################################
     # Boolean

@@ -135,7 +135,31 @@ void Smt2State::addBitvectorOperators()
 
 void Smt2State::addParametricBitvectorOperators()
 {
+  addOperator(Kind::PBV_AND, "pbvand");
+  addOperator(Kind::PBV_OR, "pbvor");
+  addOperator(Kind::PBV_XOR, "pbvxor");
+  addOperator(Kind::PBV_NOT, "pbvnot");
+  addOperator(Kind::PBV_ASHR, "pbvashr");
+  addOperator(Kind::PBV_LSHR, "pbvlshr");
+  addOperator(Kind::PBV_SHL, "pbvshl");
   addOperator(Kind::PBV_ADD, "pbvadd");
+  addOperator(Kind::PBV_SUB, "pbvsub");
+  addOperator(Kind::PBV_MULT, "pbvmul");
+  addOperator(Kind::PBV_UDIV, "pbvudiv");
+  addOperator(Kind::PBV_UREM, "pbvurem");
+  addOperator(Kind::PBV_NEG, "pbvneg");
+  addOperator(Kind::PBV_CONCAT, "pconcat");
+  addOperator(Kind::PBV_EXTRACT, "pextract");
+  addOperator(Kind::PBV_SIGN_EXTEND, "psign_extend");
+  addOperator(Kind::PBV_ZERO_EXTEND, "pzero_extend");
+  addOperator(Kind::PBV_SGE, "pbvsge");
+  addOperator(Kind::PBV_SGT, "pbvsgt");
+  addOperator(Kind::PBV_SLE, "pbvsle");
+  addOperator(Kind::PBV_SLT, "pbvslt");
+  addOperator(Kind::PBV_UGE, "pbvuge");
+  addOperator(Kind::PBV_UGT, "pbvugt");
+  addOperator(Kind::PBV_ULT, "pbvult");
+  addOperator(Kind::PBV_ULE, "pbvule");
 }
 
 void Smt2State::addFiniteFieldOperators()
@@ -902,9 +926,8 @@ void Smt2State::setLogic(std::string name)
           // addOperator(Kind::BITVECTOR_UBV_TO_INT, "bv2nat");
           // addIndexedOperator(Kind::INT_TO_BITVECTOR, "int2bv");
         }
-        // addIndexedOperator(Kind::INT_TO_BITVECTOR, "int_to_bv");
-        // addOperator(Kind::BITVECTOR_UBV_TO_INT, "ubv_to_int");
-        // addOperator(Kind::BITVECTOR_SBV_TO_INT, "sbv_to_int");
+        addOperator(Kind::PBV_SIZE, "pbvsize");
+        addOperator(Kind::INT_TO_PBV, "int_to_pbv");
       }
     }
 
