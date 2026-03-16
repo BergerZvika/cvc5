@@ -135,7 +135,7 @@ void Pow2Solver::checkFullRefine()
 
     Integer x = valXConcrete.getConst<Rational>().getNumerator();
     Integer pow2x = valPow2xAbstract.getConst<Rational>().getNumerator();
-    // add monotinicity lemmas
+    // add monotinicity lemmas: 0 <= x < y -> pow2(x) * 2 <= pow2(y)
     for (uint64_t j = i + 1; j < size; j++)
     {
       Node m = d_pow2s[j];
@@ -145,22 +145,23 @@ void Pow2Solver::checkFullRefine()
       Integer y = valYConcrete.getConst<Rational>().getNumerator();
       Integer pow2y = valPow2yAbstract.getConst<Rational>().getNumerator();
 
-      if (x >= 0 && x < y && pow2x >= pow2y)
+      if (x >= 0 && x < y &&  pow2y < pow2x + pow2x)
       {
-        // 0 <= x /\ x < y => pow2(x) < pow2(y)
         Node x_lt_y = nm->mkNode(Kind::LT, n[0], m[0]);
         Node xgeq0 = nm->mkNode(Kind::LEQ, d_zero, n[0]);
         Node assumption = nm->mkNode(Kind::AND, xgeq0, x_lt_y);
-        Node conclusion = nm->mkNode(Kind::LT, n, m);
+        Node x_times_2 = nm->mkNode(Kind::ADD, n, n);
+        Node conclusion = nm->mkNode(Kind::LEQ, x_times_2, m);
         Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
         d_im.addPendingLemma(
             lem, InferenceId::ARITH_NL_POW2_MONOTONE_REFINE, nullptr, true);
-      }
-      else if (y <= 0 && y < x && pow2x <= pow2y)
+      } else if (y < x &&  pow2x < pow2y + pow2y)
       {
-        // 0 <= y /\ y < x => pow2(y) < pow2(x)
-        Node assumption = nm->mkNode(Kind::LT, m[0], n[0]);
-        Node conclusion = nm->mkNode(Kind::LT, m, n);
+        Node y_lt_x = nm->mkNode(Kind::LT, m[0], n[0]);
+        Node ygeq0 = nm->mkNode(Kind::LEQ, d_zero, m[0]);
+        Node assumption = nm->mkNode(Kind::AND, ygeq0, y_lt_x);
+        Node y_times_2 = nm->mkNode(Kind::ADD, m, m);
+        Node conclusion = nm->mkNode(Kind::LEQ, y_times_2, n);
         Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
         d_im.addPendingLemma(
             lem, InferenceId::ARITH_NL_POW2_MONOTONE_REFINE, nullptr, true);
