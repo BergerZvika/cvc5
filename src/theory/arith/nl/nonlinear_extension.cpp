@@ -57,7 +57,8 @@ NonlinearExtension::NonlinearExtension(Env& env, TheoryArith& containing)
       d_icpSlv(d_env, d_im),
       d_iandSlv(env, d_im, d_model),
       d_piandSlv(env, d_im, d_model),
-      d_pow2Slv(env, d_im, d_model)
+      d_pow2Slv(env, d_im, d_model),
+      d_expSlv(env, d_im, d_model)
 {
   d_extTheory.addFunctionKind(Kind::NONLINEAR_MULT);
   d_extTheory.addFunctionKind(Kind::EXPONENTIAL);
@@ -66,6 +67,7 @@ NonlinearExtension::NonlinearExtension(Env& env, TheoryArith& containing)
   d_extTheory.addFunctionKind(Kind::IAND);
   d_extTheory.addFunctionKind(Kind::PIAND);
   d_extTheory.addFunctionKind(Kind::POW2);
+  d_extTheory.addFunctionKind(Kind::EXP);
   d_true = nodeManager()->mkConst(true);
 }
 
@@ -536,6 +538,9 @@ void NonlinearExtension::runStrategy(const std::vector<Node>& assertions,
       case InferStep::POW2_INIT: d_pow2Slv.initLastCall(xts); break;
       case InferStep::POW2_FULL: d_pow2Slv.checkFullRefine(); break;
       case InferStep::POW2_INITIAL: d_pow2Slv.checkInitialRefine(); break;
+      case InferStep::EXP_INIT: d_expSlv.initLastCall(xts); break;
+      case InferStep::EXP_FULL: d_expSlv.checkFullRefine(); break;
+      case InferStep::EXP_INITIAL: d_expSlv.checkInitialRefine(); break;
       case InferStep::ICP:
         d_icpSlv.reset(assertions);
         d_icpSlv.check();

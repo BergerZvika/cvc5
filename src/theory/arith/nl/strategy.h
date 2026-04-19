@@ -60,6 +60,13 @@ enum class InferStep
   /** An initial POW2 check */
   POW2_INITIAL,
 
+  /** Initialize the EXP solver */
+  EXP_INIT,
+  /** A full EXP check */
+  EXP_FULL,
+  /** An initial EXP check */
+  EXP_INITIAL,
+
   /** An ICP check */
 
   ICP,

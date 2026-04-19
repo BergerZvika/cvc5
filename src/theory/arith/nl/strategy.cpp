@@ -42,6 +42,9 @@ std::ostream& operator<<(std::ostream& os, InferStep step)
     case InferStep::POW2_INIT: return os << "POW2_INIT";
     case InferStep::POW2_FULL: return os << "POW2_FULL";
     case InferStep::POW2_INITIAL: return os << "POW2_INITIAL";
+        case InferStep::EXP_INIT: return os << "EXP_INIT";
+    case InferStep::EXP_FULL: return os << "EXP_FULL";
+    case InferStep::EXP_INITIAL: return os << "EXP_INITIAL";
     case InferStep::ICP: return os << "ICP";
     case InferStep::NL_INIT: return os << "NL_INIT";
     case InferStep::NL_MONOMIAL_INFER_BOUNDS:
@@ -135,6 +138,8 @@ void Strategy::initializeStrategy(const Options& options)
   one << InferStep::PIAND_INITIAL << InferStep::BREAK;
   one << InferStep::POW2_INIT;
   one << InferStep::POW2_INITIAL << InferStep::BREAK;
+  one << InferStep::EXP_INIT;
+  one << InferStep::EXP_INITIAL << InferStep::BREAK;
   if (options.arith.nlExt == options::NlExtMode::FULL
       || options.arith.nlExt == options::NlExtMode::LIGHT)
   {
@@ -161,6 +166,7 @@ void Strategy::initializeStrategy(const Options& options)
   one << InferStep::IAND_FULL << InferStep::BREAK;
   one << InferStep::PIAND_FULL << InferStep::BREAK;
   one << InferStep::POW2_FULL << InferStep::BREAK;
+  one << InferStep::EXP_FULL << InferStep::BREAK;
   if (options.arith.nlCov)
   {
     one << InferStep::COVERINGS_INIT << InferStep::BREAK;

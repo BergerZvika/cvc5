@@ -33,6 +33,7 @@
 #include "theory/arith/nl/nl_model.h"
 #include "theory/arith/nl/piand_solver.h"
 #include "theory/arith/nl/pow2_solver.h"
+#include "theory/arith/nl/exp_solver.h"
 #include "theory/arith/nl/stats.h"
 #include "theory/arith/nl/strategy.h"
 #include "theory/arith/nl/transcendental/transcendental_solver.h"
@@ -261,6 +262,13 @@ class NonlinearExtension : EnvObj
    * constraints involving powers of 2.
    */
   Pow2Solver d_pow2Slv;
+
+  /** The exp solver
+   *
+   * This is the subsolver responsible for running the procedure for
+   * constraints involving exponent of two integers.
+   */
+  ExpSolver d_expSlv;
 
   /** The strategy for the nonlinear extension. */
   Strategy d_strategy;

@@ -538,6 +538,7 @@ libcvc5_add_sources(
   theory/arith/nl/poly_conversion.h
   theory/arith/nl/pow2_solver.cpp
   theory/arith/nl/pow2_solver.h
+  theory/arith/nl/exp_solver.cpp
   theory/arith/nl/exp_solver.h
   theory/arith/nl/stats.cpp
   theory/arith/nl/stats.h
