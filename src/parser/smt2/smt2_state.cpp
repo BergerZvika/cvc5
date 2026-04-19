@@ -841,6 +841,8 @@ void Smt2State::setLogic(std::string name)
       addOperator(Kind::PIAND, "piand");
       // pow2
       addOperator(Kind::POW2, "int.pow2");
+      // exp
+      addOperator(Kind::EXP, "**");
       // log2
       addOperator(Kind::LOG2, "int.log2");
     }

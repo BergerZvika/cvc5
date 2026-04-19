@@ -241,6 +241,7 @@ class Variable : public NodeWrapper
       case Kind::IAND:
       case Kind::PIAND:
       case Kind::POW2:
+      case Kind::EXP:
       case Kind::INTS_LOG2:
       case Kind::POW:
       case Kind::EXPONENTIAL:

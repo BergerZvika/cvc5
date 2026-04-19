@@ -77,6 +77,7 @@ IllegalChecker::IllegalChecker(Env& e)
     d_illegalKinds.insert(Kind::IAND);
     d_illegalKinds.insert(Kind::PIAND);
     d_illegalKinds.insert(Kind::POW2);
+    d_illegalKinds.insert(Kind::EXP);
     d_illegalKinds.insert(Kind::INTS_LOG2);
   }
   if (logicInfo().isTheoryEnabled(theory::THEORY_DATATYPES)

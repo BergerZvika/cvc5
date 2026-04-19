@@ -51,6 +51,7 @@ void EqualitySolver::finishInit()
   d_ee->addFunctionKind(Kind::IAND);
   d_ee->addFunctionKind(Kind::PIAND);
   d_ee->addFunctionKind(Kind::POW2);
+  d_ee->addFunctionKind(Kind::EXP);
 }
 
 bool EqualitySolver::preNotifyFact(TNode atom,

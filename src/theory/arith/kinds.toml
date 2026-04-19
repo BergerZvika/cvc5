@@ -123,6 +123,13 @@ typerule = "SimpleTypeRule<RInteger, AInteger>"
 
 [[kinds]]
 type     = "operator"
+name     = "EXP"
+children = 2
+comment  = "arithmetic exponent of two integers"
+typerule = "SimpleTypeRule<RInteger, AInteger, AInteger>" 
+
+[[kinds]]
+type     = "operator"
 name     = "INTS_ISPOW2"
 children = 1
 comment  = "test if an integer is a power of 2"
