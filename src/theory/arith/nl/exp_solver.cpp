@@ -99,9 +99,62 @@ void ExpSolver::checkInitialRefine()
 
 void ExpSolver::sortExpsBasedOnModel() {}
 
-void ExpSolver::checkFullRefine() {}
+void ExpSolver::checkFullRefine() {
+    Trace("exp-check") << "ExpSolver::checkFullRefine" << std::endl;
+  NodeManager* nm = nodeManager();
+//   sortPow2sBasedOnModel();
+  // add lemmas for each pow2 term
+  for (uint64_t i = 0, size = d_exps.size(); i < size; i++)
+  {
+    Node n = d_exps[i];
+    Node valExpxAbstract = d_model.computeAbstractModelValue(n);
+    Node valExpxConcrete = d_model.computeConcreteModelValue(n);
 
-Node ExpSolver::valueBasedLemma(Node i) {}
+    Node x = n[0];
+    Node y = n[1];
+    Node valX = d_model.computeConcreteModelValue(x);
+    Node valY = d_model.computeConcreteModelValue(y);
+
+    Integer model_x = valX.getConst<Rational>().getNumerator();
+    Integer model_y = valY.getConst<Rational>().getNumerator();
+    if (TraceIsOn("exp-check"))
+    {
+      Trace("exp-check") << "* " << n << ", value = " << valExpxAbstract
+                          << std::endl;
+      Trace("exp-check") << "  actual " << valExpxConcrete << " = "
+                          << valExpxConcrete << std::endl;
+    }
+    if (valExpxAbstract == valExpxConcrete)
+    {
+      Trace("exp-check") << "...already correct" << std::endl;
+      continue;
+    }
+
+    // this is the most naive model-based schema based on model values
+    Node lem = valueBasedLemma(n);
+    Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; VALUE_REFINE"
+                        << std::endl;
+    // send the value lemma
+    d_im.addPendingLemma(
+        lem, InferenceId::ARITH_NL_POW2_VALUE_REFINE, nullptr, true);
+    }
+}
+
+Node ExpSolver::valueBasedLemma(Node i) {
+  Assert(i.getKind() == Kind::EXP);
+  Node x = i[0];
+  Node y = i[1];
+
+  Node valX = d_model.computeConcreteModelValue(x);
+  Node valY = d_model.computeConcreteModelValue(y);
+
+  NodeManager* nm = nodeManager();
+  Node valC = nm->mkNode(Kind::EXP, valX, valY);
+  valC = rewrite(valC);
+
+  Node assum = nm->mkNode(Kind::AND, {x.eqNode(valX), y.eqNode(valY)});
+  return nm->mkNode(Kind::IMPLIES, {assum, i.eqNode(valC)});
+}
 
 }  // namespace nl
 }  // namespace arith

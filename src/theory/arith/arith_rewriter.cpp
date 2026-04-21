@@ -1256,12 +1256,13 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
 {
   Assert(t.getKind() == Kind::EXP);
   // if constant, we eliminate
-  if (t[0].isConst())
+  if (t[0].isConst() && t[1].isConst() )
   {
     // exp is only supported for integers
     Trace("arith-rewriter")
         << "ArithRewriter::postRewriteExp, t:" << t << std::endl;
     Assert(t[0].getType().isInteger());
+    Assert(t[1].getType().isInteger());
     // use the evaluator definition for rewriting this
     Evaluator eval(nullptr);
     Node ret = eval.eval(t, {}, {});

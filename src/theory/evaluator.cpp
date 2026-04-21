@@ -658,6 +658,31 @@ EvalResult Evaluator::evalInternal(
           }
           break;
         }
+        case Kind::EXP:
+        {
+          const Rational& base = results[currNode[0]].d_rat;
+          const Rational& exponent = results[currNode[1]].d_rat;
+          bool valid = false;
+          // exp is only supported for integers; only evaluate when the
+          // exponent is a non-negative integer that fits in uint32_t and
+          // is small enough to keep the result bounded.
+          if (exponent.sgn() >= 0 && exponent.getNumerator().fitsUnsignedInt())
+          {
+            uint32_t value = exponent.getNumerator().toUnsignedInt();
+            if (value <= 256)
+            {
+              valid = true;
+              results[currNode] =
+                  EvalResult(Rational(base.getNumerator().pow(value)));
+            }
+          }
+          if (!valid)
+          {
+            processUnhandled(
+                currNode, currNodeVal, evalAsNode, results, needsReconstruct);
+          }
+          break;
+        }
         case Kind::INTS_ISPOW2:
         {
           const Rational& x = results[currNode[0]].d_rat;
