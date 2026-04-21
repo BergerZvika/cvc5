@@ -189,6 +189,9 @@ enum class InferenceId
   ARITH_NL_POW2_DIV0_CASE_REFINE,
   // lower bound refinements (Pow2Solver::checkFullRefine)
   ARITH_NL_POW2_LOWER_BOUND_CASE_REFINE,
+  //-------------------- nonlinear exp solver
+  // initial refinements (Pow2Solver::checkInitialRefine)
+  ARITH_NL_EXP_INIT_REFINE,
   //-------------------- nonlinear coverings solver
   // conflict / infeasible subset obtained from coverings
   ARITH_NL_COVERING_CONFLICT,

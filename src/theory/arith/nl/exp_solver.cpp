@@ -59,7 +59,43 @@ void ExpSolver::initLastCall(const std::vector<Node>& xts)
   Trace("exp") << "We have " << d_exps.size() << " exp terms." << std::endl;
 }
 
-void ExpSolver::checkInitialRefine() {}
+void ExpSolver::checkInitialRefine()
+{
+  Trace("exp-check") << "ExpSolver::checkInitialRefine" << std::endl;
+  NodeManager* nm = nodeManager();
+  for (const Node& i : d_exps)
+  {
+    if (d_initRefine.find(i) != d_initRefine.end())
+    {
+      // already sent initial axioms for i in this user context
+      continue;
+    }
+    d_initRefine.insert(i);
+    // initial refinement lemmas
+    std::vector<Node> conj;
+
+    Node lem = nm->mkAnd(conj);
+    // x > 0 /\ y >= 0 -> (exp x y) > 0
+    Node xgt0 = nm->mkNode(Kind::GT, i[0], d_zero);
+    Node ygeq0 = nm->mkNode(Kind::GEQ, i[1], d_zero);
+    Node nonegative = nm->mkNode(Kind::GT, i, d_zero);
+    Node pos_assum = nm->mkNode(Kind::AND, xgt0, ygeq0);
+    conj.push_back(nm->mkNode(Kind::IMPLIES, pos_assum, nonegative));
+
+    // even: x mod 2 = 0 /\ y > 0 -> (exp x y) mod 2 = 0
+    // Node xmod2 = nm->mkNode(Kind::INTS_MODULUS, i[0], d_two);
+    // Node ygt0 = nm->mkNode(Kind::GT, i[1], d_zero);
+    // Node mod2 = nm->mkNode(Kind::INTS_MODULUS, i, d_two);
+    // Node even = nm->mkNode(Kind::EQUAL, mod2, d_zero);
+    // Node even_assum = nm->mkNode(Kind::AND, xmod2, ygt0);
+    // conj.push_back(nm->mkNode(Kind::IMPLIES, even_assum, even));
+
+    Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; INIT_REFINE"
+                        << std::endl;
+    d_im.addPendingLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
+  }
+}
+
 
 void ExpSolver::sortExpsBasedOnModel() {}
 
