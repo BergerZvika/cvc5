@@ -73,8 +73,6 @@ void ExpSolver::checkInitialRefine()
     d_initRefine.insert(i);
     // initial refinement lemmas
     std::vector<Node> conj;
-
-    Node lem = nm->mkAnd(conj);
     // x > 0 /\ y >= 0 -> (exp x y) > 0
     Node xgt0 = nm->mkNode(Kind::GT, i[0], d_zero);
     Node ygeq0 = nm->mkNode(Kind::GEQ, i[1], d_zero);
@@ -90,6 +88,7 @@ void ExpSolver::checkInitialRefine()
     // Node even_assum = nm->mkNode(Kind::AND, xmod2, ygt0);
     // conj.push_back(nm->mkNode(Kind::IMPLIES, even_assum, even));
 
+    Node lem = nm->mkAnd(conj);
     Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; INIT_REFINE"
                         << std::endl;
     d_im.addPendingLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
