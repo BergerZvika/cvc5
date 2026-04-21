@@ -479,6 +479,7 @@ RewriteResponse ArithRewriter::preRewriteTerm(TNode t)
       case Kind::IAND:
       case Kind::PIAND:
       case Kind::POW2:
+      case Kind::EXP:
       case Kind::INTS_ISPOW2:
       case Kind::INTS_LOG2:
       case Kind::EXPONENTIAL:
@@ -540,6 +541,7 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t)
       case Kind::PI: return RewriteResponse(REWRITE_DONE, t);
       case Kind::POW2: return postRewritePow2(t);
       case Kind::PIAND: return postRewritePIAnd(t);
+      case Kind::EXP: return postRewriteExp(t);
       // expert cases
       case Kind::POW:
       case Kind::EXPONENTIAL:
@@ -1246,6 +1248,27 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     Node twok = nm->mkNode(Kind::POW2, t[0]);
     Node ret = nm->mkNode(Kind::INTS_MODULUS, t[1], twok);
     return RewriteResponse(REWRITE_AGAIN, ret);
+  }
+  return RewriteResponse(REWRITE_DONE, t);
+}
+
+RewriteResponse ArithRewriter::postRewriteExp(TNode t)
+{
+  Assert(t.getKind() == Kind::EXP);
+  // if constant, we eliminate
+  if (t[0].isConst())
+  {
+    // exp is only supported for integers
+    Trace("arith-rewriter")
+        << "ArithRewriter::postRewriteExp, t:" << t << std::endl;
+    Assert(t[0].getType().isInteger());
+    // use the evaluator definition for rewriting this
+    Evaluator eval(nullptr);
+    Node ret = eval.eval(t, {}, {});
+    if (!ret.isNull())
+    {
+      return RewriteResponse(REWRITE_DONE, ret);
+    }
   }
   return RewriteResponse(REWRITE_DONE, t);
 }
