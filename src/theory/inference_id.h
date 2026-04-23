@@ -194,6 +194,12 @@ enum class InferenceId
   ARITH_NL_EXP_INIT_REFINE,
   // value refinements (ExpSolver::checkFullRefine)
   ARITH_NL_EXP_VALUE_REFINE,
+  // bound refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_BOUND_CASE_REFINE,
+  // monotonicity refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_MONOTONE_REFINE,
+  // induction refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_INDUCTION_REFINE,
   //-------------------- nonlinear coverings solver
   // conflict / infeasible subset obtained from coverings
   ARITH_NL_COVERING_CONFLICT,

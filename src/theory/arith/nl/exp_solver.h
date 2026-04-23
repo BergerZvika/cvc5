@@ -68,7 +68,7 @@ class ExpSolver : protected EnvObj
   void checkFullRefine();
 
   /** sort d_exp according to their values in the current model */
-  void sortExpsBasedOnModel();
+  // void sortExpsBasedOnModel();
 
   //-------------------------------------------- end lemma schemas
  private:
@@ -82,6 +82,7 @@ class ExpSolver : protected EnvObj
   Node d_zero;
   Node d_one;
   Node d_two;
+  Node d_negone;
 
   NodeSet d_initRefine;
   /** all exp terms
