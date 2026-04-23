@@ -1190,6 +1190,12 @@ set(regress_0_tests
   regress0/nl/issue12296.smt2
   regress0/nl/lazard-spurious-root.smt2
   regress0/nl/magnitude-wrong-1020-m.smt2
+  regress0/nl/mod_elim_add.smt2
+  regress0/nl/mod_elim_mul.smt2
+  regress0/nl/mod_elim_neg_add.smt2
+  regress0/nl/mod_elim_neg_mul.smt2
+  regress0/nl/mod_elim_pos_neg_mul.smt2
+  regress0/nl/mod_elim_pow2.smt2
   regress0/nl/mult-po.smt2
   regress0/nl/nia-wrong-tl.smt2
   regress0/nl/nlExtPurify-test.smt2
