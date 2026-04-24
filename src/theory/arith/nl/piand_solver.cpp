@@ -84,7 +84,7 @@ void PIAndSolver::checkInitialRefine()
         continue;
       }
       d_initRefine.insert(i);
-      Node twok = nm->mkNode(Kind::POW2, k);
+      Node twok = nm->mkNode(Kind::EXP, d_two, k);
       Node arg0Mod = nm->mkNode(Kind::INTS_MODULUS, x, twok);
       Node arg1Mod = nm->mkNode(Kind::INTS_MODULUS, y, twok);
       Node arg0Mod2 = nm->mkNode(Kind::INTS_MODULUS, x, d_two);
@@ -209,7 +209,7 @@ void PIAndSolver::checkFullRefine()
       Integer ipow2 = itwo.pow(model_k.getLong());
       Integer max_int = ipow2 - 1;
       Node k_gt_0 = nm->mkNode(Kind::GT, k, d_zero);
-      Node twok = nm->mkNode(Kind::POW2, k);
+      Node twok = nm->mkNode(Kind::EXP, d_two, k);
       Node arg0Mod = nm->mkNode(Kind::INTS_MODULUS, x, twok);
       Node arg1Mod = nm->mkNode(Kind::INTS_MODULUS, y, twok);
       Node arg0Mod2 = nm->mkNode(Kind::INTS_MODULUS, x, d_two);
