@@ -385,7 +385,7 @@ Node PIAndSolver::sumBasedLemma(Node i, Kind kind)
   Node bound_x = nm->mkNode(Kind::AND, x_lt_pow2, x_pos);
   Node bound_y = nm->mkNode(Kind::AND, y_lt_pow2, y_pos);
   Node bounds = nm->mkNode(Kind::OR, bound_x, bound_y);
-  Node condition = nm->mkNode(Kind::AND, bound_x, width);
+  Node condition = nm->mkNode(Kind::AND, bounds, width);
   Node then = nm->mkNode(
       Kind::EQUAL, i, d_iandUtils.createSumNode(x, y, int_k, granularity));
   Node lem = nm->mkNode(Kind::IMPLIES, condition, then);
