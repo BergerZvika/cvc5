@@ -172,6 +172,13 @@ void ExpSolver::checkFullRefine() {
     Node valS = d_model.computeConcreteModelValue(s);
     Node valt = d_model.computeConcreteModelValue(t);
 
+    if (!valS.isConst() || !valt.isConst() || !valExpxAbstract.isConst())
+    {
+      valS = rewrite(valS);
+      valt = rewrite(valt);
+      valExpxAbstract = rewrite(valExpxAbstract);
+    }
+
     Integer model_s = valS.getConst<Rational>().getNumerator();
     Integer model_t = valt.getConst<Rational>().getNumerator();
     Integer expx = valExpxAbstract.getConst<Rational>().getNumerator();
@@ -197,6 +204,12 @@ void ExpSolver::checkFullRefine() {
       Node ty = m[1];
       Node valSY = d_model.computeConcreteModelValue(sy);
       Node valTY = d_model.computeConcreteModelValue(ty);
+
+      if (!valSY.isConst() || !valTY.isConst())
+      {
+        valSY = rewrite(valSY);
+        valTY = rewrite(valTY);
+      }
 
       Integer model_sy = valSY.getConst<Rational>().getNumerator();
       Integer model_ty = valTY.getConst<Rational>().getNumerator();
@@ -282,8 +295,6 @@ void ExpSolver::checkFullRefine() {
                            nullptr,
                            true);
     }
-
-
 
     // this is the most naive model-based schema based on model values
     Node lem = valueBasedLemma(n);

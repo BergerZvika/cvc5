@@ -186,6 +186,19 @@ void PIAndSolver::checkFullRefine()
       Node valX = d_model.computeConcreteModelValue(x);
       Node valY = d_model.computeConcreteModelValue(y);
 
+      // Skip refinement if any model value isn't a constant — the rewriter
+      // contract should ensure these are constants, but on rare benchmarks
+      // a model value may stay non-constant. Falling through would call
+      // getConst<Rational>() on a non-CONST_RATIONAL node and segfault.
+      if (!valAndXYC.isConst() || !valK.isConst()
+          || !valX.isConst() || !valY.isConst())
+      {
+        valAndXYC = rewrite(valAndXYC);
+        valK = rewrite(valK);
+        valX = rewrite(valX);
+        valY = rewrite(valY);
+      }
+
       Integer model_piand = valAndXYC.getConst<Rational>().getNumerator();
       Integer model_k = valK.getConst<Rational>().getNumerator();
       Integer model_x = valX.getConst<Rational>().getNumerator();
@@ -248,6 +261,16 @@ void PIAndSolver::checkFullRefine()
           Node valX2 = d_model.computeConcreteModelValue(x2);
           Node valY2 = d_model.computeConcreteModelValue(y2);
           Node valAndXYC2 = d_model.computeConcreteModelValue(n);
+
+          if (!valAndXYC2.isConst() || !valK2.isConst()
+              || !valX2.isConst() || !valY2.isConst())
+          {
+              valAndXYC2 = rewrite(valAndXYC2);
+              valK2 = rewrite(valK2);
+              valX2 = rewrite(valX2);
+              valY2 = rewrite(valY2);
+          }
+          
           Integer model_piand2 = valAndXYC2.getConst<Rational>().getNumerator();
           Integer model_k2 = valK2.getConst<Rational>().getNumerator();
           Integer model_x2 = valX2.getConst<Rational>().getNumerator();
@@ -353,7 +376,6 @@ Node PIAndSolver::sumBasedLemma(Node i, Kind kind)
   NodeManager* nm = nodeManager();
   // (i[0] >= k /\  0 <= x < 2^k /\  0 <= y < 2^k) => i = sum
   Node width = nm->mkNode(kind, i[0], k);
-  Node condition;
   Node pow2_k = nm->mkConstInt(Integer(2).pow(int_k));
   Node zero = nm->mkConstInt(Rational(0));
   Node x_pos = nm->mkNode(Kind::GEQ, x, zero);
@@ -362,7 +384,8 @@ Node PIAndSolver::sumBasedLemma(Node i, Kind kind)
   Node y_lt_pow2 = nm->mkNode(Kind::LT, y, pow2_k);
   Node bound_x = nm->mkNode(Kind::AND, x_lt_pow2, x_pos);
   Node bound_y = nm->mkNode(Kind::AND, y_lt_pow2, y_pos);
-  condition = nm->mkNode(Kind::AND, bound_x, bound_y, width);
+  Node bounds = nm->mkNode(Kind::OR, bound_x, bound_y);
+  Node condition = nm->mkNode(Kind::AND, bound_x, width);
   Node then = nm->mkNode(
       Kind::EQUAL, i, d_iandUtils.createSumNode(x, y, int_k, granularity));
   Node lem = nm->mkNode(Kind::IMPLIES, condition, then);

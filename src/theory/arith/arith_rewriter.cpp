@@ -1228,13 +1228,19 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
   // if constant, we eliminate
   if (t[0].isConst() && t[1].isConst() && t[2].isConst())
   {
-    size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
-    Node iToBvop = nm->mkConst(IntToBitVector(bsize));
-    Node arg1 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[1]);
-    Node arg2 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[2]);
-    Node bvand = nm->mkNode(Kind::BITVECTOR_AND, arg1, arg2);
-    Node ret = nm->mkNode(Kind::BITVECTOR_UBV_TO_INT, bvand);
-    return RewriteResponse(REWRITE_AGAIN_FULL, ret);
+      const Integer& kInt = t[0].getConst<Rational>().getNumerator();
+      const Integer& xInt = t[1].getConst<Rational>().getNumerator();
+      const Integer& yInt = t[2].getConst<Rational>().getNumerator();
+      // Earlier guards already returned 0 for k <= 0; here k > 0.
+      if (kInt.fitsUnsignedInt())
+      {
+        uint32_t k = kInt.toUnsignedInt();
+        Integer xMod = xInt.modByPow2(k);          // unsigned k-bit value
+        Integer yMod = yInt.modByPow2(k);
+        Integer result = xMod.bitwiseAnd(yMod);
+        return RewriteResponse(REWRITE_DONE,
+                               nm->mkConstInt(Rational(result)));
+      }
   }
   else if (t[1] > t[2])
   {
@@ -1256,20 +1262,50 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
 {
   Assert(t.getKind() == Kind::EXP);
   // if constant, we eliminate
-  if (t[0].isConst() && t[1].isConst() )
+  if (t[0].isConst() && t[1].isConst())
   {
-    // exp is only supported for integers
-    Trace("arith-rewriter")
-        << "ArithRewriter::postRewriteExp, t:" << t << std::endl;
     Assert(t[0].getType().isInteger());
     Assert(t[1].getType().isInteger());
-    // use the evaluator definition for rewriting this
-    Evaluator eval(nullptr);
-    Node ret = eval.eval(t, {}, {});
-    if (!ret.isNull())
+    NodeManager* nm = nodeManager();
+    const Integer& baseInt = t[0].getConst<Rational>().getNumerator();
+    const Integer& expInt  = t[1].getConst<Rational>().getNumerator();
+
+    // x^0 = 1  (we adopt 0^0 = 1 by convention)
+    if (expInt.sgn() == 0)
     {
-      return RewriteResponse(REWRITE_DONE, ret);
+      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(1)));
     }
+    // 1^x = 1
+    if (baseInt == 1)
+    {
+      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(1)));
+    }
+    // (-1)^x = 1 if x even, -1 if x odd
+    if (baseInt == -1)
+    {
+      bool even = expInt.modByPow2(1).sgn() == 0;
+      return RewriteResponse(REWRITE_DONE,
+                             nm->mkConstInt(Rational(even ? 1 : -1)));
+    }
+    // 0^positive = 0; 0^negative is undefined — fold to 0 to keep deterministic
+    if (baseInt.sgn() == 0)
+    {
+      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(0)));
+    }
+    // |base| >= 2, exp < 0: integer truncation gives 0
+    if (expInt.sgn() < 0)
+    {
+      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(0)));
+    }
+    // |base| >= 2, exp > 0: compute base^exp directly via GMP
+    if (expInt.fitsUnsignedInt())
+    {
+      uint32_t e = expInt.toUnsignedInt();
+      return RewriteResponse(REWRITE_DONE,
+                             nm->mkConstInt(Rational(baseInt.pow(e))));
+    }
+    // |base| >= 2 with exp not fitting in uint32 — astronomical, unreachable
+    // in practice; fall through and leave unfolded.
   }
   return RewriteResponse(REWRITE_DONE, t);
 }
