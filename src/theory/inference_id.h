@@ -164,6 +164,21 @@ enum class InferenceId
   ARITH_NL_IAND_SUM_REFINE,
   // bitwise refinements (IAndSolver::checkFullRefine)
   ARITH_NL_IAND_BITWISE_REFINE,
+  //-------------------- nonlinear piand solver
+  // initial refinements (PIAndSolver::checkInitialRefine)
+  ARITH_NL_PIAND_INIT_REFINE,
+  // base case refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_BASE_CASE_REFINE,
+  // difference refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_DIFFERENCE_REFINE,
+  // symmetry refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_SYMETRY_REFINE,
+  // contradiction refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_CONTRADITION_REFINE,
+  // one refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_ONE_REFINE,
+  // sum refinements (PIAndSolver::checkFullRefine)
+  ARITH_NL_PIAND_SUM_REFINE,
   //-------------------- nonlinear pow2 solver
   // initial refinements (Pow2Solver::checkInitialRefine)
   ARITH_NL_POW2_INIT_REFINE,
@@ -177,6 +192,17 @@ enum class InferenceId
   ARITH_NL_POW2_DIV0_CASE_REFINE,
   // lower bound refinements (Pow2Solver::checkFullRefine)
   ARITH_NL_POW2_LOWER_BOUND_CASE_REFINE,
+  //-------------------- nonlinear exp solver
+  // initial refinements (ExpSolver::checkInitialRefine)
+  ARITH_NL_EXP_INIT_REFINE,
+  // value refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_VALUE_REFINE,
+  // bound case refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_BOUND_CASE_REFINE,
+  // monotonicity refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_MONOTONE_REFINE,
+  // induction refinements (ExpSolver::checkFullRefine)
+  ARITH_NL_EXP_INDUCTION_REFINE,
   //-------------------- nonlinear coverings solver
   // conflict / infeasible subset obtained from coverings
   ARITH_NL_COVERING_CONFLICT,

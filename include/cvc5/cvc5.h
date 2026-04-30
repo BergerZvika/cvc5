@@ -1625,7 +1625,7 @@ class CVC5_EXPORT Term
    * Determine if this term is a Pbv value.
    * @return True if the term is a Pbv value.
    */
-  // bool isPbvValue() const;
+  bool isPbvValue() const;
   /**
    * Get the native string representation of a Pbv value.
    * @note Requires that this term is a Pbv value (see isPbvValue()).
@@ -1636,8 +1636,8 @@ class CVC5_EXPORT Term
    *          Term::getU32StringValue(). It will be removed in a future
    *          release.
    */
-  // [[deprecated("Use Term::getPbvValue() instead")]] std::string
-  // getPbvValue() const;
+  [[deprecated("Use Term::getPbvValue() instead")]] std::string
+  getPbvValue() const;
 
   /**
    * Determine if this term is a rational value whose numerator fits into an

@@ -1184,6 +1184,7 @@ std::string Smt2Printer::smtKindString(Kind k)
     case Kind::IAND: return "iand";
     case Kind::PIAND: return "piand";
     case Kind::POW2: return "int.pow2";
+    case Kind::EXP: return "**";
     case Kind::EXPONENTIAL: return "exp";
     case Kind::SINE: return "sin";
     case Kind::COSINE: return "cos";

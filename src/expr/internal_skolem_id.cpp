@@ -37,6 +37,8 @@ const char* toString(InternalSkolemId id)
     case InternalSkolemId::QUANTIFIERS_ATTRIBUTE_INTERNAL:
       return "QUANTIFIERS_ATTRIBUTE_INTERNAL";
     case InternalSkolemId::GET_VALUE_PURIFY: return "GET_VALUE_PURIFY";
+    case InternalSkolemId::PBV_CHI: return "PBV_CHI";
+    case InternalSkolemId::PBV_KAPPA: return "PBV_KAPPA";
     default: return "?";
   }
 }

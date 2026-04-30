@@ -4398,6 +4398,100 @@ enum ENUM(ProofRewriteRule)
   EVALUE(BV_SIGN_EXTEND_ULT_CONST_3),
   /** Auto-generated from RARE rule bv-sign-extend-ult-const-4 */
   EVALUE(BV_SIGN_EXTEND_ULT_CONST_4),
+  /** Auto-generated from RARE rule pbv-concat-extract-merge */
+  EVALUE(PBV_CONCAT_EXTRACT_MERGE),
+  /** Auto-generated from RARE rule pbv-extract-extract */
+  EVALUE(PBV_EXTRACT_EXTRACT),
+  /** Auto-generated from RARE rule pbv-extract-whole */
+  EVALUE(PBV_EXTRACT_WHOLE),
+  /** Auto-generated from RARE rule pbv-add-zero */
+  EVALUE(PBV_ADD_ZERO),
+  /** Auto-generated from RARE rule pbv-neg-sub */
+  EVALUE(PBV_NEG_SUB),
+  /** Auto-generated from RARE rule pbv-neg-idemp */
+  EVALUE(PBV_NEG_IDEMP),
+  /** Auto-generated from RARE rule pbv-mul-one */
+  EVALUE(PBV_MUL_ONE),
+  /** Auto-generated from RARE rule pbv-mul-zero */
+  EVALUE(PBV_MUL_ZERO),
+  /** Auto-generated from RARE rule pbv-zero-extend-eliminate */
+  EVALUE(PBV_ZERO_EXTEND_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-sign-extend-eliminate */
+  EVALUE(PBV_SIGN_EXTEND_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-ugt-eliminate */
+  EVALUE(PBV_UGT_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-uge-eliminate */
+  EVALUE(PBV_UGE_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-sgt-eliminate */
+  EVALUE(PBV_SGT_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-sge-eliminate */
+  EVALUE(PBV_SGE_ELIMINATE),
+  /** Auto-generated from RARE rule pbv-shl-by-const-0 */
+  EVALUE(PBV_SHL_BY_CONST_0),
+  /** Auto-generated from RARE rule pbv-lshr-by-const-0 */
+  EVALUE(PBV_LSHR_BY_CONST_0),
+  /** Auto-generated from RARE rule pbv-ashr-by-const-0 */
+  EVALUE(PBV_ASHR_BY_CONST_0),
+  /** Auto-generated from RARE rule pbv-shl-zero */
+  EVALUE(PBV_SHL_ZERO),
+  /** Auto-generated from RARE rule pbv-lshr-zero */
+  EVALUE(PBV_LSHR_ZERO),
+  /** Auto-generated from RARE rule pbv-ashr-zero */
+  EVALUE(PBV_ASHR_ZERO),
+  /** Auto-generated from RARE rule pbv-and-zero */
+  EVALUE(PBV_AND_ZERO),
+  /** Auto-generated from RARE rule pbv-or-zero */
+  EVALUE(PBV_OR_ZERO),
+  /** Auto-generated from RARE rule pbv-or-one */
+  EVALUE(PBV_OR_ONE),
+  /** Auto-generated from RARE rule pbv-xor-zero */
+  EVALUE(PBV_XOR_ZERO),
+  /** Auto-generated from RARE rule pbv-xor-not */
+  EVALUE(PBV_XOR_NOT),
+  /** Auto-generated from RARE rule pbv-not-idemp */
+  EVALUE(PBV_NOT_IDEMP),
+  /** Auto-generated from RARE rule pbv-ult-zero-1 */
+  EVALUE(PBV_ULT_ZERO_1),
+  /** Auto-generated from RARE rule pbv-ult-zero-2 */
+  EVALUE(PBV_ULT_ZERO_2),
+  /** Auto-generated from RARE rule pbv-ult-one */
+  EVALUE(PBV_ULT_ONE),
+  /** Auto-generated from RARE rule pbv-lt-self */
+  EVALUE(PBV_LT_SELF),
+  /** Auto-generated from RARE rule pbv-slt-self */
+  EVALUE(PBV_SLT_SELF),
+  /** Auto-generated from RARE rule pbv-ule-zero */
+  EVALUE(PBV_ULE_ZERO),
+  /** Auto-generated from RARE rule pbv-zero-ule */
+  EVALUE(PBV_ZERO_ULE),
+  /** Auto-generated from RARE rule pbv-ule-self */
+  EVALUE(PBV_ULE_SELF),
+  /** Auto-generated from RARE rule pbv-sle-self */
+  EVALUE(PBV_SLE_SELF),
+  /** Auto-generated from RARE rule pbv-udiv-zero */
+  EVALUE(PBV_UDIV_ZERO),
+  /** Auto-generated from RARE rule pbv-udiv-one */
+  EVALUE(PBV_UDIV_ONE),
+  /** Auto-generated from RARE rule pbv-urem-one */
+  EVALUE(PBV_UREM_ONE),
+  /** Auto-generated from RARE rule pbv-reverse-extract-and */
+  EVALUE(PBV_REVERSE_EXTRACT_AND),
+  /** Auto-generated from RARE rule pbv-sub-zero */
+  EVALUE(PBV_SUB_ZERO),
+  /** Auto-generated from RARE rule pbv-not-neq */
+  EVALUE(PBV_NOT_NEQ),
+  /** Auto-generated from RARE rule pbv-shl-by-const-2 */
+  EVALUE(PBV_SHL_BY_CONST_2),
+  /** Auto-generated from RARE rule pbv-lshr-by-const-2 */
+  EVALUE(PBV_LSHR_BY_CONST_2),
+  /** Auto-generated from RARE rule pbv-bitwise-idemp-2 */
+  EVALUE(PBV_BITWISE_IDEMP_2),
+  /** Auto-generated from RARE rule pbv-xor-duplicate */
+  EVALUE(PBV_XOR_DUPLICATE),
+  /** Auto-generated from RARE rule pbv-ule-max */
+  EVALUE(PBV_ULE_MAX),
+  /** Auto-generated from RARE rule pbv-urem-self */
+  EVALUE(PBV_UREM_SELF),
   /** Auto-generated from RARE rule sets-eq-singleton-emp */
   EVALUE(SETS_EQ_SINGLETON_EMP),
   /** Auto-generated from RARE rule sets-member-singleton */

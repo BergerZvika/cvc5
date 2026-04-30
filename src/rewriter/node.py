@@ -113,7 +113,7 @@ class Op(Enum):
     PBVMULT = ('pbvmul', 'PBV_MULT')
     PBVUDIV = ('pbvudiv', 'PBV_UDIV')
     PBVUREM = ('pbvurem', 'PBV_UREM')
-    PBVUREM = ('pbvneg', 'PBV_NEG')
+    PBVNEG = ('pbvneg', 'PBV_NEG')
     PBVCONCAT = ('pconcat', 'PBV_CONCAT')
     PBVEXTRACT = ('pextract', 'PBV_EXTRACT')
     PBVSIGNEXTEND = ('psign_extend', 'PBV_SIGN_EXTEND')

@@ -58,6 +58,16 @@ enum class InternalSkolemId
   QUANTIFIERS_ATTRIBUTE_INTERNAL,
   /** Skolem used for subsolver in get-value */
   GET_VALUE_PURIFY,
+  /**
+   * χ(x): fresh Int variable representing the integer value of PBV variable x.
+   * Used by the PBV int-blaster (CONV function, Algorithm 3).
+   */
+  PBV_CHI,
+  /**
+   * κ(x): fresh Int variable representing the symbolic bit-width of PBV variable x.
+   * Used by the PBV int-blaster (BW function, Algorithm 2).
+   */
+  PBV_KAPPA,
 };
 /** Converts an internal skolem function name to a string. */
 const char* toString(InternalSkolemId id);

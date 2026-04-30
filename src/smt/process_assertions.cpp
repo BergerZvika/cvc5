@@ -201,6 +201,7 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
 
   // Assertions MUST BE guaranteed to be rewritten by this point
   applyPass("rewrite", ap);
+  applyPass("pbv-to-int", ap);
 
   // Convert non-top-level Booleans to bit-vectors of size 1
   if (options().bv.boolToBitvector != options::BoolToBVMode::OFF)
@@ -361,7 +362,23 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   {
     std::ostream& outPA = d_env.output(OutputTag::POST_ASSERTS);
     outPA << ";; post-asserts start" << std::endl;
-    dumpAssertionsToStream(outPA, ap);
+    // If pbv-to-int ran, compute the post-blast logic (UFNIA) here rather than
+    // mutating Env::d_logic (which has no public setter for passes).  The logic
+    // string is derived from the pre-blast logic by applying exactly the same
+    // transformations that pbv-to-int imposes on the problem.
+    std::string postLogic;
+    if (logicInfo().isTheoryEnabled(theory::THEORY_PBV))
+    {
+      LogicInfo li = logicInfo().getUnlockedCopy();
+      li.enableTheory(theory::THEORY_UF);
+      li.enableTheory(theory::THEORY_ARITH);
+      li.enableIntegers();
+      li.arithNonLinear();
+      li.disableTheory(theory::THEORY_PBV);
+      li.lock();
+      postLogic = li.getLogicString();
+    }
+    dumpAssertionsToStream(outPA, ap, postLogic);
     outPA << ";; post-asserts end" << std::endl;
   }
 
@@ -469,7 +486,8 @@ void ProcessAssertions::dumpAssertions(const std::string& key,
 }
 
 void ProcessAssertions::dumpAssertionsToStream(std::ostream& os,
-                                               const AssertionPipeline& ap)
+                                               const AssertionPipeline& ap,
+                                               const std::string& logicOverride)
 {
   PrintBenchmark pb(nodeManager(), Printer::getPrinter(os));
   std::vector<Node> assertions;
@@ -499,7 +517,9 @@ void ProcessAssertions::dumpAssertionsToStream(std::ostream& os,
   {
     assertions.push_back(ap[i]);
   }
-  pb.printBenchmark(os, logicInfo().getLogicString(), defs, assertions);
+  const std::string& logicStr =
+      logicOverride.empty() ? logicInfo().getLogicString() : logicOverride;
+  pb.printBenchmark(os, logicStr, defs, assertions);
 }
 
 PreprocessingPassResult ProcessAssertions::applyPass(const std::string& pname,

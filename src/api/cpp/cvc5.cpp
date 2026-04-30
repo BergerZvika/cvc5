@@ -151,6 +151,7 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
         KIND_ENUM(Kind::IAND, internal::Kind::IAND),
         KIND_ENUM(Kind::PIAND, internal::Kind::PIAND),
         KIND_ENUM(Kind::POW2, internal::Kind::POW2),
+        KIND_ENUM(Kind::EXP, internal::Kind::EXP),
         KIND_ENUM(Kind::LOG2, internal::Kind::INTS_LOG2),
         KIND_ENUM(Kind::SUB, internal::Kind::SUB),
         KIND_ENUM(Kind::NEG, internal::Kind::NEG),
@@ -260,7 +261,7 @@ const static std::unordered_map<Kind, std::pair<internal::Kind, std::string>>
         KIND_ENUM(Kind::FINITE_FIELD_ADD, internal::Kind::FINITE_FIELD_ADD),
         KIND_ENUM(Kind::FINITE_FIELD_NEG, internal::Kind::FINITE_FIELD_NEG),
         /* PBV -------------------------------------------------------------- */
-        // KIND_ENUM(Kind::CONST_PBV, internal::Kind::CONST_PBV),
+        KIND_ENUM(Kind::CONST_PBV, internal::Kind::CONST_PBV),
         KIND_ENUM(Kind::PBV_AND, internal::Kind::PBV_AND),
         KIND_ENUM(Kind::PBV_OR, internal::Kind::PBV_OR),
         KIND_ENUM(Kind::PBV_XOR, internal::Kind::PBV_XOR),
@@ -582,6 +583,7 @@ const static std::unordered_map<internal::Kind,
         {internal::Kind::IAND, Kind::IAND},
         {internal::Kind::PIAND, Kind::PIAND},
         {internal::Kind::POW2, Kind::POW2},
+        {internal::Kind::EXP, Kind::EXP},
         {internal::Kind::INTS_LOG2, Kind::LOG2},
         {internal::Kind::SUB, Kind::SUB},
         {internal::Kind::NEG, Kind::NEG},
@@ -688,7 +690,7 @@ const static std::unordered_map<internal::Kind,
         {internal::Kind::BITVECTOR_BIT_OP, Kind::BITVECTOR_BIT},
         {internal::Kind::BITVECTOR_BIT, Kind::BITVECTOR_BIT},
         /* PBV -------------------------------------------------------------- */
-        // {internal::Kind::CONST_PBV, Kind::CONST_PBV},
+        {internal::Kind::CONST_PBV, Kind::CONST_PBV},
         {internal::Kind::PBV_AND, Kind::PBV_AND},
         {internal::Kind::PBV_OR, Kind::PBV_OR},
         {internal::Kind::PBV_XOR, Kind::PBV_XOR},
@@ -3239,30 +3241,30 @@ std::u32string Term::getU32StringValue() const
   CVC5_API_TRY_CATCH_END;
 }
 
-// bool Term::isPbvValue() const
-// {
-//   CVC5_API_TRY_CATCH_BEGIN;
-//   CVC5_API_CHECK_NOT_NULL;
-//   //////// all checks before this line
-//   return d_node->getKind() == internal::Kind::CONST_PBV;
-//   ////////
-//   CVC5_API_TRY_CATCH_END;
-// }
+bool Term::isPbvValue() const
+{
+  CVC5_API_TRY_CATCH_BEGIN;
+  CVC5_API_CHECK_NOT_NULL;
+  //////// all checks before this line
+  return d_node->getKind() == internal::Kind::CONST_PBV;
+  ////////
+  CVC5_API_TRY_CATCH_END;
+}
 
-// std::string Term::getPbvValue() const
-// {
-//   CVC5_API_TRY_CATCH_BEGIN;
-//   CVC5_API_CHECK_NOT_NULL;
-//   CVC5_API_ARG_CHECK_EXPECTED(d_node->getKind() == internal::Kind::CONST_PBV,
-//                               *d_node)
+std::string Term::getPbvValue() const
+{
+  CVC5_API_TRY_CATCH_BEGIN;
+  CVC5_API_CHECK_NOT_NULL;
+  CVC5_API_ARG_CHECK_EXPECTED(d_node->getKind() == internal::Kind::CONST_PBV,
+                              *d_node)
                               
-//       << "Term to be a pbv value when calling getPbvValue()";
-//   //////// all checks before this line
-//   // return d_node->getConst<internal::Pbv>().toString();
-//   return d_node->getConst<internal::BitVector>().toString();
-//   ////////
-//   CVC5_API_TRY_CATCH_END;
-// }
+      << "Term to be a pbv value when calling getPbvValue()";
+  //////// all checks before this line
+  // return d_node->getConst<internal::Pbv>().toString();
+  return d_node->getConst<internal::Pbv>().toString();
+  ////////
+  CVC5_API_TRY_CATCH_END;
+}
 
 std::vector<internal::Node> Term::termVectorToNodes(
     const std::vector<Term>& terms)

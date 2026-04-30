@@ -1,4 +1,5 @@
 #include "theory/pbv/theory_pbv.h"
+
 #include "theory/ee_setup_info.h"
 #include "theory/uf/equality_engine.h"
 
@@ -13,6 +14,7 @@ TheoryPbv::TheoryPbv(Env& env,
                      Valuation valuation,
                      std::string name)
     : Theory(THEORY_PBV, env, out, valuation, name),
+    d_intBlaster(env),
     d_rewriter(nodeManager()),
     d_state(env, valuation),
     d_im(env, *this, d_state, "theory::pbv::"),
@@ -43,7 +45,6 @@ void TheoryPbv::finishInit()
 }
 
 TrustNode TheoryPbv::explain(TNode) {
-//   std::cout << "explain\n";
   return TrustNode();
 }
 
@@ -64,14 +65,13 @@ void TheoryPbv::preRegisterTerm(TNode node)
 }
 
 bool TheoryPbv::needsCheckLastEffort() {
-//   if (d_lastEffortCalled) {
-//     return false;
-//   }
-//   d_lastEffortCalled = true;
-//   presolve();
   return false;
 }
 
+TrustNode TheoryPbv::ppRewrite(TNode t, std::vector<SkolemLemma>& lems)
+{
+  return TrustNode::null();
+}
 
 }  // namespace pbv
 }  // namespace theory

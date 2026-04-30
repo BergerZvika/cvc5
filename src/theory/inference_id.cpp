@@ -101,6 +101,20 @@ const char* toString(InferenceId i)
       return "ARITH_NL_IAND_SUM_REFINE";
     case InferenceId::ARITH_NL_IAND_BITWISE_REFINE:
       return "ARITH_NL_IAND_BITWISE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_INIT_REFINE:
+      return "ARITH_NL_PIAND_INIT_REFINE";
+    case InferenceId::ARITH_NL_PIAND_BASE_CASE_REFINE:
+      return "ARITH_NL_PIAND_BASE_CASE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_DIFFERENCE_REFINE:
+      return "ARITH_NL_PIAND_DIFFERENCE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_SYMETRY_REFINE:
+      return "ARITH_NL_PIAND_SYMETRY_REFINE";
+    case InferenceId::ARITH_NL_PIAND_CONTRADITION_REFINE:
+      return "ARITH_NL_PIAND_CONTRADITION_REFINE";
+    case InferenceId::ARITH_NL_PIAND_ONE_REFINE:
+      return "ARITH_NL_PIAND_ONE_REFINE";
+    case InferenceId::ARITH_NL_PIAND_SUM_REFINE:
+      return "ARITH_NL_PIAND_SUM_REFINE";
     case InferenceId::ARITH_NL_POW2_INIT_REFINE:
       return "ARITH_NL_POW2_INIT_REFINE";
     case InferenceId::ARITH_NL_POW2_VALUE_REFINE:
@@ -113,6 +127,16 @@ const char* toString(InferenceId i)
       return "ARITH_NL_POW2_DIV0_CASE_REFINE";
     case InferenceId::ARITH_NL_POW2_LOWER_BOUND_CASE_REFINE:
       return "ARITH_NL_POW2_LOWER_BOUND_CASE_REFINE";
+    case InferenceId::ARITH_NL_EXP_INIT_REFINE:
+      return "ARITH_NL_EXP_INIT_REFINE";
+    case InferenceId::ARITH_NL_EXP_VALUE_REFINE:
+      return "ARITH_NL_EXP_VALUE_REFINE";
+    case InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE:
+      return "ARITH_NL_EXP_BOUND_CASE_REFINE";
+    case InferenceId::ARITH_NL_EXP_MONOTONE_REFINE:
+      return "ARITH_NL_EXP_MONOTONE_REFINE";
+    case InferenceId::ARITH_NL_EXP_INDUCTION_REFINE:
+      return "ARITH_NL_EXP_INDUCTION_REFINE";
     case InferenceId::ARITH_NL_COVERING_CONFLICT: return "ARITH_NL_COVERING_CONFLICT";
     case InferenceId::ARITH_NL_COVERING_EXCLUDED_INTERVAL:
       return "ARITH_NL_COVERING_EXCLUDED_INTERVAL";

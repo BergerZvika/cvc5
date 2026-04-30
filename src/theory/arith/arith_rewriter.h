@@ -104,8 +104,12 @@ class ArithRewriter : public TheoryRewriter
 
   /** postRewrite IAND */
   RewriteResponse postRewriteIAnd(TNode t);
+  /** postRewrite PIAND: constant-fold piand(k, x, y) when all args are const */
+  RewriteResponse postRewritePIAnd(TNode t);
   /** postRewrite POW2 */
   RewriteResponse postRewritePow2(TNode t);
+  /** postRewrite EXP */
+  RewriteResponse postRewriteExp(TNode t);
   /** postRewrite INTS_IS_POW2 */
   RewriteResponse postRewriteIntsIsPow2(TNode t);
   /** postRewrite INTS_LOG2 */

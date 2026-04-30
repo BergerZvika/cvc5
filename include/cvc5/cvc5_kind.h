@@ -607,6 +607,26 @@ enum ENUM(Kind)
    */
   EVALUE(POW2),
   /**
+   * Exponent of two integers.
+   *
+   * Operator for raising ``x`` to a non-negative integer power.
+   *
+   * - Arity: ``2``
+   *
+   *   - ``1:`` Term of Sort Int
+   *   - ``2:`` Term of Sort Int
+   *
+   * - Create Term of this Kind with:
+   *
+   *   - TermManager::mkTerm(Kind, const std::vector<Term>&)
+   *   - TermManager::mkTerm(const Op&, const std::vector<Term>&)
+   *
+   * - Create Op of this kind with:
+   *
+   *   - TermManager::mkOp(Kind, const std::vector<uint32_t>&)
+   */
+  EVALUE(EXP),
+  /**
    * Log of base two.
    *
    * Operator for the inverse of raising ``2`` to a non-negative integer power.
@@ -2219,7 +2239,7 @@ enum ENUM(Kind)
    *
    *   - TermManager::mkPbv(const std::string&, bool)
    */
-  // EVALUE(CONST_PBV),
+  EVALUE(CONST_PBV),
     /**
    * Parametric Bit-wise and.
    *

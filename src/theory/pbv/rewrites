@@ -1,0 +1,367 @@
+; Rewrite Rules of the Parametric Bit-Vector Rewriter RW_B
+;
+; Source: Appendix A of "Bit-Precise Reasoning with Parametric Bit-Vectors"
+;         Berger, Zohar, Niemetz, Preiner, Reynolds, Barrett, Tinelli (SAT 2025)
+;
+; ---------------------------------------------------------------------------
+; Concat / Extract normalisation  (Appendix A)
+; ---------------------------------------------------------------------------
+
+; bv-concat-extract-merge:
+;   (pconcat (pextract s k j1) (pextract s j i)) => (pextract s k i)
+;   Fires when the two extractions are from the same source s and j1 = j+1,
+;   i.e. they are adjacent.
+;   NOTE: the source-equality check (node[0][0] == node[1][0]) is emitted as
+;   a structural guard by walk_lhs because the same Var 's' appears twice.
+(define-cond-rule pbv-concat-extract-merge
+  ((s ?) (i Int) (j Int) (j1 Int) (k Int))
+  (= j1 (+ j 1))
+  (pconcat (pextract s k j1) (pextract s j i))
+  (pextract s k i))
+
+; bv-extract-extract:
+;   (pextract (pextract x j i) l k) => (pextract x (i+l) (i+k))
+;   All variables are structurally bound from the LHS; the RHS builds
+;   (i+l) and (i+k) as inline ADD nodes, handled by node_to_cpp in
+;   generate_rewriter.py.
+(define-rule pbv-extract-extract
+  ((x ?) (i Int) (j Int) (k Int) (l Int))
+  (pextract (pextract x j i) l k)
+  (pextract x (+ i l) (+ i k)))
+
+; bv-extract-whole:
+;   (pextract x n 0) => x  when n = pbvsize(x) - 1
+;   The condition uses pbvsize; arith_to_cpp in generate_rewriter.py emits
+;   nm->mkNode(Kind::PBV_SIZE,...) so the Node equality check is generated
+;   correctly.
+(define-cond-rule pbv-extract-whole
+  ((x ?) (n Int))
+  (= n (- (pbvsize x) 1))
+  (pextract x n 0)
+  x)
+
+; ---------------------------------------------------------------------------
+; Arithmetic identities
+; ---------------------------------------------------------------------------
+
+; bv-add-zero: (pbvadd x (int_to_pbv k 0)) => x
+(define-rule pbv-add-zero
+  ((x ?) (k Int))
+  (pbvadd x (int_to_pbv k 0))
+  x)
+
+; bv-sub-zero: (pbvsub x (int_to_pbv k 0)) => x
+(define-rule pbv-sub-zero
+  ((x ?) (k Int))
+  (pbvsub x (int_to_pbv k 0))
+  x)
+
+; bv-add-self: (pbvadd x (pbvneg x)) => (int_to_pbv k 0)
+;   NOTE: RHS needs width k which is not bound by the LHS pattern.
+;   Implemented as raw C++ in theory_pbv_rewriter.cpp.
+; (define-rule pbv-add-self ...)
+
+; bv-not-neq: (= x (pbvnot x)) => false
+;   (No width-dependent constant on RHS; directly expressible.)
+(define-rule pbv-not-neq
+  ((x ?))
+  (= x (pbvnot x))
+  false)
+
+; bv-neg-sub: (pbvneg (pbvsub x y)) => (pbvsub y x)
+(define-rule pbv-neg-sub
+  ((x ?) (y ?))
+  (pbvneg (pbvsub x y))
+  (pbvsub y x))
+
+; bv-neg-idemp: (pbvneg (pbvneg x)) => x
+(define-rule pbv-neg-idemp
+  ((x ?))
+  (pbvneg (pbvneg x))
+  x)
+
+; bv-mul-one: (pbvmul x (int_to_pbv k 1)) => x
+(define-rule pbv-mul-one
+  ((x ?) (k Int))
+  (pbvmul x (int_to_pbv k 1))
+  x)
+
+; bv-mul-zero: (pbvmul x (int_to_pbv k 0)) => (int_to_pbv k 0)
+(define-rule pbv-mul-zero
+  ((x ?) (k Int))
+  (pbvmul x (int_to_pbv k 0))
+  (int_to_pbv k 0))
+
+; ---------------------------------------------------------------------------
+; Extend elimination
+; ---------------------------------------------------------------------------
+
+; bv-zero-extend-eliminate: (pzero_extend 0 x) => x
+(define-rule pbv-zero-extend-eliminate
+  ((x ?))
+  (pzero_extend 0 x)
+  x)
+
+; bv-sign-extend-eliminate: (psign_extend 0 x) => x
+(define-rule pbv-sign-extend-eliminate
+  ((x ?))
+  (psign_extend 0 x)
+  x)
+
+; ---------------------------------------------------------------------------
+; Comparison reduction
+; ---------------------------------------------------------------------------
+
+; bv-ugt-eliminate: (pbvugt x y) => (pbvult y x)
+(define-rule pbv-ugt-eliminate
+  ((x ?) (y ?))
+  (pbvugt x y)
+  (pbvult y x))
+
+; bv-uge-eliminate: (pbvuge x y) => (pbvule y x)
+(define-rule pbv-uge-eliminate
+  ((x ?) (y ?))
+  (pbvuge x y)
+  (pbvule y x))
+
+; bv-sgt-eliminate: (pbvsgt x y) => (pbvslt y x)
+(define-rule pbv-sgt-eliminate
+  ((x ?) (y ?))
+  (pbvsgt x y)
+  (pbvslt y x))
+
+; bv-sge-eliminate: (pbvsge x y) => (pbvsle y x)
+(define-rule pbv-sge-eliminate
+  ((x ?) (y ?))
+  (pbvsge x y)
+  (pbvsle y x))
+
+; ---------------------------------------------------------------------------
+; Shift by constant zero / shift of zero value
+; ---------------------------------------------------------------------------
+
+; bv-shl-by-const-0: (pbvshl x (int_to_pbv k 0)) => x
+(define-rule pbv-shl-by-const-0
+  ((x ?) (k Int))
+  (pbvshl x (int_to_pbv k 0))
+  x)
+
+; bv-shl-by-const-2: (pbvshl x (int_to_pbv k k)) => (int_to_pbv k 0)
+;   Fires when the shift amount equals the bit-width k (i.e., shifts out all bits).
+;   k is bound twice in the LHS: as the width argument of int_to_pbv and as its
+;   value argument.  The duplicate-Var guard ensures k_width == k_value.
+(define-rule pbv-shl-by-const-2
+  ((x ?) (k Int))
+  (pbvshl x (int_to_pbv k k))
+  (int_to_pbv k 0))
+
+; bv-lshr-by-const-0: (pbvlshr x (int_to_pbv k 0)) => x
+(define-rule pbv-lshr-by-const-0
+  ((x ?) (k Int))
+  (pbvlshr x (int_to_pbv k 0))
+  x)
+
+; bv-lshr-by-const-2: (pbvlshr x (int_to_pbv k k)) => (int_to_pbv k 0)
+;   Analogous to bv-shl-by-const-2: all bits are shifted out.
+(define-rule pbv-lshr-by-const-2
+  ((x ?) (k Int))
+  (pbvlshr x (int_to_pbv k k))
+  (int_to_pbv k 0))
+
+; bv-ashr-by-const-0: (pbvashr x (int_to_pbv k 0)) => x
+(define-rule pbv-ashr-by-const-0
+  ((x ?) (k Int))
+  (pbvashr x (int_to_pbv k 0))
+  x)
+
+; bv-shl-zero: (pbvshl (int_to_pbv k 0) x) => (int_to_pbv k 0)
+(define-rule pbv-shl-zero
+  ((x ?) (k Int))
+  (pbvshl (int_to_pbv k 0) x)
+  (int_to_pbv k 0))
+
+; bv-lshr-zero: (pbvlshr (int_to_pbv k 0) x) => (int_to_pbv k 0)
+(define-rule pbv-lshr-zero
+  ((x ?) (k Int))
+  (pbvlshr (int_to_pbv k 0) x)
+  (int_to_pbv k 0))
+
+; bv-ashr-zero: (pbvashr (int_to_pbv k 0) x) => (int_to_pbv k 0)
+(define-rule pbv-ashr-zero
+  ((x ?) (k Int))
+  (pbvashr (int_to_pbv k 0) x)
+  (int_to_pbv k 0))
+
+; ---------------------------------------------------------------------------
+; Bitwise identity / annihilation
+; ---------------------------------------------------------------------------
+
+; bv-and-zero: (pbvand x (int_to_pbv k 0)) => (int_to_pbv k 0)
+(define-rule pbv-and-zero
+  ((x ?) (k Int))
+  (pbvand x (int_to_pbv k 0))
+  (int_to_pbv k 0))
+
+; bv-or-zero: (pbvor x (int_to_pbv k 0)) => x
+(define-rule pbv-or-zero
+  ((x ?) (k Int))
+  (pbvor x (int_to_pbv k 0))
+  x)
+
+; bv-or-one: (pbvor x (pbvnot (int_to_pbv k 0))) => (pbvnot (int_to_pbv k 0))
+(define-rule pbv-or-one
+  ((x ?) (k Int))
+  (pbvor x (pbvnot (int_to_pbv k 0)))
+  (pbvnot (int_to_pbv k 0)))
+
+; bv-bitwise-idemp-2: (pbvor x x) => x
+;   OR of a term with itself is idempotent.  The duplicate Var x triggers the
+;   structural self-equality guard in the generated C++ matcher.
+(define-rule pbv-bitwise-idemp-2
+  ((x ?))
+  (pbvor x x)
+  x)
+
+; bv-bitwise-not-or: (pbvor x (pbvnot x)) => (pbvnot (int_to_pbv k 0))
+;   NOTE: RHS requires the all-ones constant whose width k equals |x|.
+;   k is not structurally bound by the LHS pattern, so this rule CANNOT be
+;   expressed as a flat RARE rule.
+;   Implemented as raw C++ in theory_pbv_rewriter.cpp.
+; (define-rule pbv-bitwise-not-or
+; ((x ?))
+; (pbvor x (pbvnot x))
+; (pbvnot (int_to_pbv (pbvsize x) 0)))
+
+; bv-xor-zero: (pbvxor x (int_to_pbv k 0)) => x
+(define-rule pbv-xor-zero
+  ((x ?) (k Int))
+  (pbvxor x (int_to_pbv k 0))
+  x)
+
+; bv-xor-duplicate: (pbvxor x x) => (int_to_pbv k 0)
+(define-rule pbv-xor-duplicate 
+  ((x ?))
+  (pbvxor x x)
+  (int_to_pbv (pbvsize x) 0))
+
+; bv-xor-simplify-2: (pbvxor x (pbvnot x)) => (pbvnot (int_to_pbv k 0))
+;   NOTE: Same width-on-RHS constraint; implemented as raw C++ in theory_pbv_rewriter.cpp.
+; (define-rule pbv-xor-simplify-2 ...)
+
+; bv-xor-not: (pbvxor (pbvnot x) y) => (pbvnot (pbvxor x y))
+(define-rule pbv-xor-not
+  ((x ?) (y ?))
+  (pbvxor (pbvnot x) y)
+  (pbvnot (pbvxor x y)))
+
+; bv-not-idemp: (pbvnot (pbvnot x)) => x
+(define-rule pbv-not-idemp
+  ((x ?))
+  (pbvnot (pbvnot x))
+  x)
+
+; ---------------------------------------------------------------------------
+; Unsigned less-than constant-zero / self corners
+;   (put zero-constant rules BEFORE unconditional self-equality rules so the
+;    if-chain short-circuits correctly)
+; ---------------------------------------------------------------------------
+
+; bv-ult-zero-1: (pbvult (int_to_pbv k 0) x) => (not (= x (int_to_pbv k 0)))
+(define-rule pbv-ult-zero-1
+  ((x ?) (k Int))
+  (pbvult (int_to_pbv k 0) x)
+  (not (= x (int_to_pbv k 0))))
+
+; bv-ult-zero-2: (pbvult x (int_to_pbv k 0)) => false
+(define-rule pbv-ult-zero-2
+  ((x ?) (k Int))
+  (pbvult x (int_to_pbv k 0))
+  false)
+
+; bv-ult-one: (pbvult x (int_to_pbv k 1)) => (= x (int_to_pbv k 0))
+(define-rule pbv-ult-one
+  ((x ?) (k Int))
+  (pbvult x (int_to_pbv k 1))
+  (= x (int_to_pbv k 0)))
+
+; bv-ult-self: (pbvult x x) => false
+(define-rule pbv-lt-self
+  ((x ?))
+  (pbvult x x)
+  false)
+
+; bv-lt-self: (pbvslt x x) => false
+(define-rule pbv-slt-self
+  ((x ?))
+  (pbvslt x x)
+  false)
+
+; bv-ule-zero: (pbvule x (int_to_pbv k 0)) => (= x (int_to_pbv k 0))
+(define-rule pbv-ule-zero
+  ((x ?) (k Int))
+  (pbvule x (int_to_pbv k 0))
+  (= x (int_to_pbv k 0)))
+
+; bv-zero-ule: (pbvule (int_to_pbv k 0) x) => true
+(define-rule pbv-zero-ule
+  ((x ?) (k Int))
+  (pbvule (int_to_pbv k 0) x)
+  true)
+
+; bv-ule-self: (pbvule x x) => true
+(define-rule pbv-ule-self
+  ((x ?))
+  (pbvule x x)
+  true)
+
+; bv-sle-self: (pbvsle x x) => true
+(define-rule pbv-sle-self
+  ((x ?))
+  (pbvsle x x)
+  true)
+
+; bv-ule-max: (pbvule x (pbvnot 0)) => true
+(define-rule pbv-ule-max
+  ((x ?) (k Int))
+  (pbvule x (pbvnot (int_to_pbv k 0)))
+  true)
+
+; ---------------------------------------------------------------------------
+; Division / modulo identities
+; ---------------------------------------------------------------------------
+
+; bv-udiv-zero: (pbvudiv x (int_to_pbv k 0)) => (pbvnot (int_to_pbv k 0))
+(define-rule pbv-udiv-zero
+  ((x ?) (k Int))
+  (pbvudiv x (int_to_pbv k 0))
+  (pbvnot (int_to_pbv k 0)))
+
+; bv-udiv-one: (pbvudiv x (int_to_pbv k 1)) => x
+(define-rule pbv-udiv-one
+  ((x ?) (k Int))
+  (pbvudiv x (int_to_pbv k 1))
+  x)
+
+; bv-urem-one: (pbvurem x (int_to_pbv k 1)) => (int_to_pbv k 0)
+(define-rule pbv-urem-one
+  ((x ?) (k Int))
+  (pbvurem x (int_to_pbv k 1))
+  (int_to_pbv k 0))
+
+; bv-urem-self: (pbvurem x x) => (int_to_pbv k 0)
+(define-rule pbv-urem-self
+  ((x ?))
+  (pbvurem x x)
+  (int_to_pbv (pbvsize x) 0))
+
+; ---------------------------------------------------------------------------
+; Right-to-left extract-and merge (Section 4.1, Example 5 reversed)
+;   Applied in the right-to-left direction for T_PBV to avoid extra mod/pow2.
+; ---------------------------------------------------------------------------
+
+; bv-reverse-extract-and:
+;   (pbvand (pextract x j i) (pextract y j i)) => (pextract (pbvand x y) j i)
+(define-rule pbv-reverse-extract-and
+  ((x ?) (y ?) (i Int) (j Int))
+  (pbvand (pextract x j i) (pextract y j i))
+  (pextract (pbvand x y) j i))

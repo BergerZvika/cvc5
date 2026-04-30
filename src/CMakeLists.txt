@@ -74,6 +74,8 @@ libcvc5_add_sources(
   preprocessing/passes/bv_to_bool.h
   preprocessing/passes/bv_to_int.cpp
   preprocessing/passes/bv_to_int.h
+  preprocessing/passes/pbv_to_int.cpp
+  preprocessing/passes/pbv_to_int.h
   preprocessing/passes/extended_rewriter_pass.cpp
   preprocessing/passes/extended_rewriter_pass.h
   preprocessing/passes/ff_bitsum.cpp
@@ -509,6 +511,7 @@ libcvc5_add_sources(
   theory/arith/nl/ext_theory_callback.h
   theory/arith/nl/iand_solver.cpp
   theory/arith/nl/iand_solver.h
+  theory/arith/nl/piand_solver.cpp
   theory/arith/nl/piand_solver.h
   theory/arith/nl/icp/candidate.cpp
   theory/arith/nl/icp/candidate.h
@@ -530,6 +533,8 @@ libcvc5_add_sources(
   theory/arith/nl/poly_conversion.h
   theory/arith/nl/pow2_solver.cpp
   theory/arith/nl/pow2_solver.h
+  theory/arith/nl/exp_solver.cpp
+  theory/arith/nl/exp_solver.h
   theory/arith/nl/stats.cpp
   theory/arith/nl/stats.h
   theory/arith/nl/strategy.cpp
@@ -682,9 +687,14 @@ libcvc5_add_sources(
   theory/bv/type_enumerator.h
   theory/pbv/theory_pbv.cpp
   theory/pbv/theory_pbv.h
-  theory/pbv/theory_pbv_rewriter.h
   theory/pbv/theory_pbv_type_rules.cpp
   theory/pbv/theory_pbv_type_rules.h
+  theory/pbv/theory_pbv_utils.cpp
+  theory/pbv/theory_pbv_utils.h
+  theory/pbv/type_enumerator.h
+  theory/pbv/int_blaster.cpp
+  theory/pbv/int_blaster.h
+  theory/pbv/theory_pbv_rewriter.h
   theory/care_graph.h
   theory/care_pair_argument_callback.cpp
   theory/care_pair_argument_callback.cpp
@@ -1458,6 +1468,7 @@ set(REWRITES_FILES
   ${PROJECT_SOURCE_DIR}/src/theory/bv/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/bv/rewrites-elimination
   ${PROJECT_SOURCE_DIR}/src/theory/bv/rewrites-simplification
+  ${PROJECT_SOURCE_DIR}/src/theory/pbv/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/sets/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/strings/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/strings/rewrites-regexp-membership

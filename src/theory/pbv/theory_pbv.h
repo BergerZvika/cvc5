@@ -3,6 +3,7 @@
 #ifndef CVC5__THEORY__PBV__THEORY_PBV_H
 #define CVC5__THEORY__PBV__THEORY_PBV_H
 
+#include "theory/pbv/int_blaster.h"
 #include "theory/pbv/theory_pbv_rewriter.h"
 #include "theory/theory.h"
 #include "theory/theory_eq_notify.h"
@@ -57,7 +58,7 @@ class TheoryPbv : public Theory {
   // bool preCheck(Effort e) override {}
   // void postCheck(Effort e) override  {}
   //--------------------------------- end standard check
-  // TrustNode ppRewrite(TNode t, std::vector<SkolemLemma>& lems) override {}
+  TrustNode ppRewrite(TNode t, std::vector<SkolemLemma>& lems) override;
 
   TrustNode ppStaticRewrite(TNode atom) override { return TrustNode::null(); }
 
@@ -79,7 +80,10 @@ class TheoryPbv : public Theory {
  private:
   // void notifySharedTerm(TNode t) override {}
 
-   /** The theory rewriter for this theory. */
+  /** The int-blaster for TRANS/CONV translation. */
+  PIntBlaster d_intBlaster;
+
+  /** The theory rewriter for this theory. */
   TheoryPbvRewriter d_rewriter;
 
   /** A (default) theory state object */

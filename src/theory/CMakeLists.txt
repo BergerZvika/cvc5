@@ -16,6 +16,7 @@
 libcvc5_add_sources(GENERATED
   rewriter_tables.h
   theory_traits.h
+  pbv/theory_pbv_rewriter.cpp
   type_enumerator.cpp
 )
 
@@ -55,9 +56,27 @@ add_custom_command(
   DEPENDS mktheorytraits.py type_enumerator_template.cpp ${KINDS_TOML_FILES}
 )
 
+set(gen_pbv_rewriter_script
+  ${CMAKE_CURRENT_LIST_DIR}/pbv/generate_rewriter.py)
+
+add_custom_command(
+  OUTPUT
+    pbv/theory_pbv_rewriter.cpp
+  COMMAND
+    ${Python_EXECUTABLE}
+    ${gen_pbv_rewriter_script}
+    --output-dir ${CMAKE_CURRENT_BINARY_DIR}/pbv
+  DEPENDS
+    ${gen_pbv_rewriter_script}
+    ${CMAKE_CURRENT_LIST_DIR}/pbv/rewrites
+  COMMENT
+    "Generating theory_pbv_rewriter.cpp"
+)
+
 add_custom_target(gen-theory
   DEPENDS
     type_enumerator.cpp
     theory_traits.h
     rewriter_tables.h
+    pbv/theory_pbv_rewriter.cpp
 )

@@ -27,25 +27,15 @@ comment       = "pbv type"
 class  = "::cvc5::internal::theory::pbv::ParametricBitVectorEnumerator"
 header = "theory/pbv/type_enumerator.h"
 
-# [[kinds]]
-# type      = "constant"
-# name      = "CONST_PBV"
-# class_key = "class"
-# cpp_type  = "Pbv"
-# hasher    = "::cvc5::internal::pbv::PbvHashFunction"
-# header    = "util/pbv.h"
-# comment   = "a pbv value"
-# typerule  = "SimpleTypeRule<RPbv>"
-
-# [[kinds]]
-# type      = "constant"
-# name      = "CONST_PBV"
-# class_key = "class"
-# cpp_type  = "BitVector"
-# hasher    = "::cvc5::internal::BitVectorHashFunction"
-# header    = "util/bitvector.h"
-# comment   = "a parametric width bit-vector constant; payload is an instance of the cvc5::internal::BitVector class"
-# typerule  = "::cvc5::internal::theory::bv::BitVectorConstantTypeRule"
+[[kinds]]
+type      = "constant"
+name      = "CONST_PBV"
+class_key = "class"
+cpp_type  = "Pbv"
+hasher    = "::cvc5::internal::pbv::PbvHashFunction"
+header    = "util/pbv.h"
+comment   = "a pbv value"
+typerule  = "SimpleTypeRule<RPbv>"
 
 ## bit-wise kinds
 [[kinds]]

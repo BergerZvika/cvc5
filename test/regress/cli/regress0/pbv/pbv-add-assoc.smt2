@@ -1,0 +1,10 @@
+; EXPECT: unsat
+; pbvadd is associative: (x + y) + z = x + (y + z)  (mod 2^k)
+(set-logic PBV)
+(declare-fun x () PBitVec)
+(declare-fun y () PBitVec)
+(declare-fun z () PBitVec)
+(assert (= (pbvsize x) (pbvsize y)))
+(assert (= (pbvsize y) (pbvsize z)))
+(assert (not (= (pbvadd (pbvadd x y) z) (pbvadd x (pbvadd y z)))))
+(check-sat)

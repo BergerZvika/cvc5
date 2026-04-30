@@ -114,9 +114,18 @@ class ProcessAssertions : protected EnvObj
                       const preprocessing::AssertionPipeline& ap);
   /**
    * Dump assertions to stream os using the print benchmark utility.
+   *
+   * @param os         The output stream.
+   * @param ap         The assertion pipeline to dump.
+   * @param logicOverride When non-empty, use this string as the (set-logic ...)
+   *                   header instead of the one reported by logicInfo().  This
+   *                   allows post-preprocessing outputs to advertise a different
+   *                   logic (e.g. UFNIA after pbv-to-int) without mutating the
+   *                   authoritative Env::d_logic.
    */
   void dumpAssertionsToStream(std::ostream& os,
-                              const preprocessing::AssertionPipeline& ap);
+                              const preprocessing::AssertionPipeline& ap,
+                              const std::string& logicOverride = "");
   /** apply pass */
   preprocessing::PreprocessingPassResult applyPass(
       const std::string& pass, preprocessing::AssertionPipeline& ap);

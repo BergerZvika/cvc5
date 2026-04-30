@@ -132,6 +132,11 @@ void Pow2Solver::checkFullRefine()
       Trace("pow2-check") << "  actual " << valXConcrete << " = "
                           << valPow2xConcrete << std::endl;
     }
+    if (!valPow2xAbstract.isConst() || !valPow2xConcrete.isConst()
+        || !valXConcrete.isConst())
+    {
+      continue;
+    }
     if (valPow2xAbstract == valPow2xConcrete)
     {
       Trace("pow2-check") << "...already correct" << std::endl;
@@ -147,6 +152,10 @@ void Pow2Solver::checkFullRefine()
       Node valPow2yAbstract = d_model.computeAbstractModelValue(m);
       Node valYConcrete = d_model.computeConcreteModelValue(m[0]);
 
+      if (!valPow2yAbstract.isConst() || !valYConcrete.isConst())
+      {
+        continue;
+      }
       Integer y = valYConcrete.getConst<Rational>().getNumerator();
       Integer pow2y = valPow2yAbstract.getConst<Rational>().getNumerator();
 

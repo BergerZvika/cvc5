@@ -34,7 +34,9 @@
 #include "theory/arith/nl/iand_solver.h"
 #include "theory/arith/nl/icp/icp_solver.h"
 #include "theory/arith/nl/nl_model.h"
+#include "theory/arith/nl/piand_solver.h"
 #include "theory/arith/nl/pow2_solver.h"
+#include "theory/arith/nl/exp_solver.h"
 #include "theory/arith/nl/stats.h"
 #include "theory/arith/nl/strategy.h"
 #include "theory/arith/nl/transcendental/transcendental_solver.h"
@@ -251,12 +253,27 @@ class NonlinearExtension : EnvObj
    */
   IAndSolver d_iandSlv;
 
+  /** The piand solver
+   *
+   * This is the subsolver responsible for running the procedure for
+   * constraints involving parametric integer and (PIAND), the
+   * arithmetic encoding of bit-vector AND with a symbolic bit-width.
+   */
+  PIAndSolver d_piandSlv;
+
   /** The pow2 solver
    *
    * This is the subsolver responsible for running the procedure for
    * constraints involving powers of 2.
    */
   Pow2Solver d_pow2Slv;
+
+  /** The exp solver
+   *
+   * This is the subsolver responsible for running the procedure for
+   * constraints involving integer exponentiation (exp(x,y) = x^y).
+   */
+  ExpSolver d_expSlv;
 
   /** The strategy for the nonlinear extension. */
   Strategy d_strategy;

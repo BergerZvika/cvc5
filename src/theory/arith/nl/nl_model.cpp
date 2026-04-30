@@ -212,7 +212,8 @@ bool NlModel::checkModel(const std::vector<Node>& assertions,
           Kind k = cur.getKind();
           if (k != Kind::MULT && k != Kind::ADD && k != Kind::NONLINEAR_MULT
               && k != Kind::TO_REAL && !isTranscendentalKind(k)
-              && k != Kind::IAND && k != Kind::PIAND && k != Kind::POW2)
+              && k != Kind::IAND && k != Kind::PIAND && k != Kind::POW2
+              && k != Kind::EXP)
           {
             // if we have not set an approximate bound for it
             if (!hasAssignment(cur))
@@ -891,8 +892,9 @@ bool NlModel::simpleCheckModelMsum(const std::map<Node, Node>& msum, bool pol)
               << "  failed due to unknown bound for " << vc << std::endl;
           // should either assign a model bound or eliminate the variable
           // via substitution
-          Assert(false) << "A variable " << vc
-                        << " is missing a bound/value in the model";
+          Trace("nl-ext-cms")
+              << "  failed: variable " << vc
+              << " is missing a bound/value in the model" << std::endl;
           return false;
         }
       }

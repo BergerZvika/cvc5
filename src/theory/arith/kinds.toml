@@ -119,7 +119,14 @@ type     = "operator"
 name     = "POW2"
 children = 1
 comment  = "arithmetic power of 2"
-typerule = "SimpleTypeRule<RInteger, AInteger>" 
+typerule = "SimpleTypeRule<RInteger, AInteger>"
+
+[[kinds]]
+type     = "operator"
+name     = "EXP"
+children = 2
+comment  = "arithmetic exponent of two integers"
+typerule = "SimpleTypeRule<RInteger, AInteger, AInteger>"
 
 [[kinds]]
 type     = "operator"

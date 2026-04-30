@@ -662,10 +662,42 @@ EvalResult Evaluator::evalInternal(
           else if (x.getNumerator().fitsUnsignedInt())
           {
             uint32_t value = x.getNumerator().toUnsignedInt();
-            if (value <= 256)
+            // The PBV int-blaster emits pow2(k) for k = bit-width and
+            // benchmarks routinely use widths in the hundreds. The previous
+            // cap of 256 made any larger constant fall through to
+            // theory_arith.cpp's "POW(^) below 67108864" LogicException.
+            // 1<<20 covers all realistic bit-widths (PBV benchmarks pick
+            // values up to ~131k) while keeping the resulting integer
+            // below ~128 KB.
+            if (value <= (1u << 20))
             {
               valid = true;
               results[currNode] = EvalResult(Rational(Integer(2).pow(value)));
+            }
+          }
+          if (!valid)
+          {
+            processUnhandled(
+                currNode, currNodeVal, evalAsNode, results, needsReconstruct);
+          }
+          break;
+        }
+        case Kind::EXP:
+        {
+          const Rational& base = results[currNode[0]].d_rat;
+          const Rational& exponent = results[currNode[1]].d_rat;
+          bool valid = false;
+          // exp is only supported for integers; only evaluate when the
+          // exponent is a non-negative integer that fits in uint32_t and
+          // is small enough to keep the result bounded.
+          if (exponent.sgn() >= 0 && exponent.getNumerator().fitsUnsignedInt())
+          {
+            uint32_t value = exponent.getNumerator().toUnsignedInt();
+            if (value <= 256)
+            {
+              valid = true;
+              results[currNode] =
+                  EvalResult(Rational(base.getNumerator().pow(value)));
             }
           }
           if (!valid)
