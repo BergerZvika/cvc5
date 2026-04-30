@@ -134,17 +134,10 @@ void PBVToInt::addSkolemDefinitions(const std::map<Node, Node>& skolems)
 {
   for (const auto& [orig, def] : skolems)
   {
-    // Skip PBV-typed back-definitions of the form
-    //   s : PBitVec  ⇒  (int_to_pbv κ χ(s))
-    // They keep the original PBV variable declared in the post-translation
-    // formula purely for model reconstruction. Dropping them removes every
-    // residual PBitVec symbol from the UFNIA dump (model reconstruction
-    // for `get-model` of the original PBV var is forfeited; the integer
-    // counterpart `pbv_<name>` is still in the model).
-    if (orig.getType().isPbv() || def.getType().isPbv())
-    {
-      continue;
-    }
+    // Keep PBV-typed back-definitions (`s : PBitVec  ⇒  int_to_pbv κ χ(s)`)
+    // so the model engine can recover (get-value s) from the integer
+    // skolems χ and κ. TheoryPbv::collectModelValues unwraps this form into
+    // a CONST_PBV `(_ pbv <val> <width>)` constant.
     Trace("pbv-to-int-debug")
         << "adding substitution: [" << orig << "] ----> [" << def << "]"
         << std::endl;

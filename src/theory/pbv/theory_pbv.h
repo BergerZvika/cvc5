@@ -63,8 +63,8 @@ class TheoryPbv : public Theory {
   TrustNode ppStaticRewrite(TNode atom) override { return TrustNode::null(); }
 
   /** Collect model values in m based on the relevant terms given by termSet */
-  // bool collectModelValues(TheoryModel* m,
-                          // const std::set<Node>& termSet) override { }
+  bool collectModelValues(TheoryModel* m,
+                          const std::set<Node>& termSet) override;
 
   // void propagate(Effort e) override {}
 

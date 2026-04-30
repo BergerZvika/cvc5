@@ -224,6 +224,18 @@ Node PIntBlaster::makeBinary(Node n)
 // Helper: fresh skolems for χ and κ
 // ============================================================================
 
+Node PIntBlaster::lookupChi(Node pbvVar) const
+{
+  auto it = d_chiMap.find(pbvVar);
+  return it == d_chiMap.end() ? Node::null() : (*it).second;
+}
+
+Node PIntBlaster::lookupKappa(Node pbvVar) const
+{
+  auto it = d_kappaMap.find(pbvVar);
+  return it == d_kappaMap.end() ? Node::null() : (*it).second;
+}
+
 Node PIntBlaster::getOrCreateChi(Node pbvVar)
 {
   auto it = d_chiMap.find(pbvVar);

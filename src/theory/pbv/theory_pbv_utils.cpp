@@ -17,6 +17,7 @@
 
 #include "options/theory_options.h"
 #include "theory/theory.h"
+#include "util/pbv.h"
 
 using namespace cvc5::internal::kind;
 
@@ -25,11 +26,17 @@ namespace cvc5::internal {
 namespace theory {
 namespace pbv {
 namespace utils {
-    
+
 /* ------------------------------------------------------------------------- */
 
-Node mkConst(NodeManager* nm, unsigned int value) {}
-Node mkConst(NodeManager* nm, Integer& value) {}
+Node mkConst(NodeManager* nm, unsigned int value)
+{
+  return nm->mkConst(Kind::CONST_PBV, Pbv(Integer(value)));
+}
+Node mkConst(NodeManager* nm, Integer& value)
+{
+  return nm->mkConst(Kind::CONST_PBV, Pbv(value));
+}
 /* ------------------------------------------------------------------------- */
 
 

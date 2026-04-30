@@ -22,10 +22,12 @@ class Pbv {
 
  public:
   Pbv(const Integer& val);
+  Pbv(const Integer& val, const Integer& size);
   Pbv() = default;
   ~Pbv() {}
 
   const Integer& getValue() const;
+  const Integer& getSize() const;
 
   // Comparison operators required for the theory mechanism
   bool operator==(const Pbv& other) const;
@@ -37,6 +39,7 @@ class Pbv {
 
  private:
   Integer d_val;
+  Integer d_size;
 };
 
 

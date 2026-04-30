@@ -97,6 +97,11 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
    */
   void scanAssertion(Node n) { buildKappaUnionFind(n); }
 
+  /** Look up χ(pbvVar) without creating one. Returns null if absent. */
+  Node lookupChi(Node pbvVar) const;
+  /** Look up κ(pbvVar) without creating one. Returns null if absent. */
+  Node lookupKappa(Node pbvVar) const;
+
  protected:
   /**
    * CONV for a node whose children have already been translated (post-order).
