@@ -141,6 +141,14 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
   Node utsSym(Node k, Node x);
 
   /**
+   * Match smt-switch AbstractPBVWalker::bvlshr(x, y) (default form):
+   *   intTerm = x div pow2(y)
+   *   inner   = ite(pow2(y) = 0, pow2(k) - 1, intTerm)
+   *   result  = ite(pow2(k) = 0, inner, inner mod pow2(k))
+   */
+  Node bvlshrSym(Node x, Node y, Node k);
+
+  /**
    * Get or create χ(pbvVar): fresh Int skolem for the integer value of the
    * free PBV variable pbvVar.  Stored in d_chiMap.
    */
@@ -252,6 +260,15 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
   /** If node = (e mod modValue) and removing the mod is safe, return e. */
   Node rmModIfRedundant(Node node, Node modValue);
 
+  /**
+   * Replace every `(pbvsize V)` subterm with `computeKappa(V)`. Used when
+   * emitting admissibility constraints whose width arguments come from raw
+   * (untranslated) PBV positions like the indices of pextract or the
+   * extension amount of sign/zero-extend. Without this, `(pbvsize V)` leaks
+   * into the post-translation formula as an untranslated UF.
+   */
+  Node normalizeWidthExpr(Node n);
+
   // ---- caches (context-dependent) ----------------------------------------
   /** Memoization for makeBinary. */
   CDNodeMap d_binarizeCache;
@@ -274,6 +291,15 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
   std::unordered_map<Node, Node> d_kappaClassExplicit;
   /** Counter for the next kappa-class name. */
   size_t d_kappaClassCount = 0;
+
+  /**
+   * Admissibility constraints generated inside a quantifier scope. Such
+   * constraints reference the quantifier's bound integer kappa(s); emitting
+   * them at the top level would let those bound variables escape and capture
+   * a free skolem of the same name. Instead they are folded into the
+   * quantifier's guard when the FORALL/EXISTS is rebuilt.
+   */
+  std::unordered_map<Node, std::vector<Node>> d_quantAdmConstraints;
 
   NodeManager* d_nm;
 

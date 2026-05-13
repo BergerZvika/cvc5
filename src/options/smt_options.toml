@@ -398,6 +398,22 @@ name   = "SMT Layer"
   help       = "use internal pow2 operator when translating shift notes"
 
 [[option]]
+  name       = "pbvToIntUsePow2"
+  category   = "expert"
+  long       = "pbv-to-int-use-pow2"
+  type       = "bool"
+  default    = "false"
+  help       = "use the internal POW2 operator instead of (** 2 k) when translating PBV to integer"
+
+[[option]]
+  name       = "pbvToIntUtsHalfPow2"
+  category   = "expert"
+  long       = "pbv-to-int-uts-half-pow2"
+  type       = "bool"
+  default    = "false"
+  help       = "in PBV-to-int utsSym, encode pow2(k-1) as pow2(k) div 2 instead of pow2(k-1)"
+
+[[option]]
   name       = "BVAndIntegerGranularity"
   category   = "expert"
   long       = "bvand-integer-granularity=N"

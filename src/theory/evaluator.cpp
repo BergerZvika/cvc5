@@ -687,6 +687,11 @@ EvalResult Evaluator::evalInternal(
           const Rational& base = results[currNode[0]].d_rat;
           const Rational& exponent = results[currNode[1]].d_rat;
           bool valid = false;
+          if (exponent.sgn() < 0 && base != 1 && base != -1)
+          {
+            results[currNode] = EvalResult(Rational(0));
+            valid = true;
+          }
           // exp is only supported for integers; only evaluate when the
           // exponent is a non-negative integer that fits in uint32_t and
           // is small enough to keep the result bounded.

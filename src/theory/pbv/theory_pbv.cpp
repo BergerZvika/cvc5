@@ -48,8 +48,13 @@ void TheoryPbv::finishInit()
   }
 }
 
-TrustNode TheoryPbv::explain(TNode) {
-  return TrustNode();
+TrustNode TheoryPbv::explain(TNode n) {
+  // The PBV theory does not propagate any of its own facts (it only adds
+  // terms to the equality engine). If the engine still asks us to explain
+  // a propagation, return a self-justifying trust node with `true` as the
+  // explanation rather than a null TrustNode — a null one segfaults
+  // downstream in TheoryEngine::getExplanation when getNode() is called.
+  return TrustNode::mkTrustPropExp(n, nodeManager()->mkConst(true));
 }
 
 void TheoryPbv::preRegisterTerm(TNode node)

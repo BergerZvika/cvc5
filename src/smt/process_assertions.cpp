@@ -509,8 +509,38 @@ void ProcessAssertions::dumpAssertionsToStream(std::ostream& os,
   std::vector<Node> defs;
   const theory::SubstitutionMap& sm = d_env.getTopLevelSubstitutions().get();
   const std::unordered_map<Node, Node>& ss = sm.getSubstitutions();
+  // When post-translation logic differs from the pre-translation one
+  // (e.g. PBV → UFNIA via pbv-to-int), drop substitutions whose body still
+  // mentions terms or types from the eliminated theory. These are dead
+  // back-defines (e.g. `s := (int_to_pbv _k pbv_s)`) or user define-funs
+  // (`min`, `max`, `udivtotal`, …) that survived in the symbol table but
+  // are not referenced by any post-translation assertion. Keeping them
+  // makes the dump unparseable as the new logic.
+  const bool dropPbv = !logicOverride.empty()
+                       && logicInfo().isTheoryEnabled(theory::THEORY_PBV);
+  auto mentionsPbv = [&](TNode n) {
+    std::unordered_set<TNode> seen;
+    std::vector<TNode> stack{n};
+    while (!stack.empty())
+    {
+      TNode c = stack.back();
+      stack.pop_back();
+      if (!seen.insert(c).second) continue;
+      if (c.getType().isPbv()) return true;
+      if (theory::kindToTheoryId(c.getKind()) == theory::THEORY_PBV)
+      {
+        return true;
+      }
+      for (TNode kid : c) stack.push_back(kid);
+    }
+    return false;
+  };
   for (const std::pair<const Node, Node>& s : ss)
   {
+    if (dropPbv && (mentionsPbv(s.first) || mentionsPbv(s.second)))
+    {
+      continue;
+    }
     defs.push_back(s.first.eqNode(s.second));
   }
   for (size_t i = 0, size = ap.size(); i < size; i++)

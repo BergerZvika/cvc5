@@ -16,6 +16,7 @@
 
 #include "theory/pbv/int_blaster.h"
 
+#include <functional>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -361,14 +362,17 @@ Node PIntBlaster::kappaSource(Node t)
   // forward to operand 0; ITE forwards to its first branch.  Structural
   // ops (concat / extract / extend / int_to_pbv) have no single witness —
   // return null so the caller skips unioning at that operand.
-  // Bound PBV variables are NOT valid leaves: their kappa is also a bound
-  // variable (set up by registerBoundKappas), and unioning them with free
-  // variables would let a bound kappa escape its quantifier.
+  // Bound PBV variables ARE valid leaves: by unifying them in the union-find
+  // with the free PBV variables they are forced to share a width with (e.g.
+  // `pbvadd x s` forces κ_x = κ_s), the bound variable can borrow the class's
+  // free kappa skolem instead of needing its own quantified kappa. This
+  // avoids the admissibility-constraint capture problem where two free
+  // kappas tied to a single bound kappa would be related only inside the
+  // quantifier (and so end up as a disjunct in the negated form).
   while (true)
   {
     if (t.isVar() && t.getType().isPbv())
     {
-      if (t.getKind() == Kind::BOUND_VARIABLE) return Node::null();
       return t;
     }
     if (t.getKind() == Kind::CONST_PBV) return t;
@@ -480,6 +484,24 @@ void PIntBlaster::buildKappaUnionFind(Node n)
           }
         };
 
+        // Reject an explicit width expression `ek` if it mentions PBV_SIZE
+        // anywhere (regardless of which class the inner var belongs to).
+        // The post-translation output must be pure UFNIA — `(pbvsize ...)`
+        // is a PBV-theory call and cannot leak into kappa values, otherwise
+        // every translated assertion using that kappa keeps `pbvsize` live.
+        // Names kept (`selfRefExplicit`, parameter `rep`) for diff minimality.
+        auto selfRefExplicit = [&](Node ek, Node /*rep*/) -> bool {
+          std::vector<Node> stack{ek};
+          while (!stack.empty())
+          {
+            Node n = stack.back();
+            stack.pop_back();
+            if (n.getKind() == Kind::PBV_SIZE) return true;
+            for (const Node& kid : n) stack.push_back(kid);
+          }
+          return false;
+        };
+
         Node src0 = kappaSource(cur[0]);
         Node ek0 = explicitK(cur[0]);
         for (uint32_t i = 1; i < cur.getNumChildren(); i++)
@@ -495,13 +517,15 @@ void PIntBlaster::buildKappaUnionFind(Node n)
           if (!srci.isNull() && !ek0.isNull())
           {
             Node rep = kappaFind(srci);
-            if (d_kappaClassExplicit.find(rep) == d_kappaClassExplicit.end())
+            if (d_kappaClassExplicit.find(rep) == d_kappaClassExplicit.end()
+                && !selfRefExplicit(ek0, rep))
               d_kappaClassExplicit[rep] = ek0;
           }
           if (!src0.isNull() && !eki.isNull())
           {
             Node rep = kappaFind(src0);
-            if (d_kappaClassExplicit.find(rep) == d_kappaClassExplicit.end())
+            if (d_kappaClassExplicit.find(rep) == d_kappaClassExplicit.end()
+                && !selfRefExplicit(eki, rep))
               d_kappaClassExplicit[rep] = eki;
           }
         }
@@ -541,26 +565,42 @@ Node PIntBlaster::computeKappa(Node t)
 
   switch (k)
   {
-    // to-pbv(width, val): κ = the width argument (first child)
+    // to-pbv(width, val): κ = the width argument (first child).
+    // If the width argument is itself `(pbvsize V)` (very common in PBV
+    // benchmarks), normalize it to computeKappa(V) so admissibility
+    // constraints emitted with this kappa equal the same skolem
+    // computeKappa hands back elsewhere — without this, the constraint
+    // becomes `(= _k (pbvsize s))` which is opaque to the rewriter and
+    // ends up as a defeasible disjunct in the negated form.
     case Kind::INT_TO_PBV:
     {
-      result = t[0];
+      Node k = t[0];
+      if (k.getKind() == Kind::PBV_SIZE && k.getNumChildren() == 1)
+      {
+        k = computeKappa(k[0]);
+      }
+      result = k;
       break;
     }
-    // t[i:j]: κ = i - j + 1
+    // t[i:j]: κ = i - j + 1.
     case Kind::PBV_EXTRACT:
     {
+      Node i = normalizeWidthExpr(t[1]);
+      Node j = normalizeWidthExpr(t[2]);
       result = d_nm->mkNode(
-          Kind::ADD, d_nm->mkNode(Kind::SUB, t[1], t[2]), d_one);
+          Kind::ADD, d_nm->mkNode(Kind::SUB, i, j), d_one);
       break;
     }
     // zero_extend(n, t) or sign_extend(n, t): κ = κ(t) + n
     case Kind::PBV_ZERO_EXTEND:
     case Kind::PBV_SIGN_EXTEND:
     {
-      result = d_nm->mkNode(Kind::ADD, computeKappa(t[1]), t[0]);
+      result = d_nm->mkNode(
+          Kind::ADD, computeKappa(t[1]), normalizeWidthExpr(t[0]));
       break;
     }
+    // t[i:j]: κ = (i - j + 1), but indices may be `(pbvsize V)` expressions
+    // that the integer solver treats as uninterpreted unless normalized.
     // t1 ○ t2: κ = κ(t1) + κ(t2)
     case Kind::PBV_CONCAT:
     {
@@ -611,12 +651,42 @@ Node PIntBlaster::computeKappa(Node t)
   return result;
 }
 
+Node PIntBlaster::normalizeWidthExpr(Node n)
+{
+  if (n.getKind() == Kind::PBV_SIZE && n.getNumChildren() == 1)
+  {
+    return computeKappa(n[0]);
+  }
+  if (n.getNumChildren() == 0)
+  {
+    return n;
+  }
+  std::vector<Node> kids;
+  bool changed = false;
+  if (n.getMetaKind() == kind::metakind::PARAMETERIZED)
+  {
+    kids.push_back(n.getOperator());
+  }
+  for (const Node& c : n)
+  {
+    Node nc = normalizeWidthExpr(c);
+    if (nc != c) changed = true;
+    kids.push_back(nc);
+  }
+  return changed ? d_nm->mkNode(n.getKind(), kids) : n;
+}
+
 // ============================================================================
 // mkPow2Sym / modPow2Sym / utsSym
 // ============================================================================
 
 Node PIntBlaster::mkPow2Sym(Node k)
 {
+  // Default: (** 2 k). With --pbv-to-int-use-pow2: the internal POW2 operator.
+  if (options().smt.pbvToIntUsePow2)
+  {
+    return d_nm->mkNode(Kind::POW2, k);
+  }
   return d_nm->mkNode(Kind::EXP, d_two, k);
 }
 
@@ -628,10 +698,34 @@ Node PIntBlaster::modPow2Sym(Node n, Node k)
 Node PIntBlaster::utsSym(Node k, Node x)
 {
   // uts(k, z) = 2 * (z mod pow2(k-1)) - z
-  Node kMinus1 = d_nm->mkNode(Kind::SUB, k, d_one);
-  Node modPart = modPow2Sym(x, kMinus1);
+  // With --pbv-to-int-uts-half-pow2: encode pow2(k-1) as pow2(k) div 2,
+  // avoiding a (- k 1) argument to pow2 (relevant for the POW2 operator path,
+  // which is undefined on negative exponents).
+  Node halfPow2;
+  if (options().smt.pbvToIntUtsHalfPow2)
+  {
+    halfPow2 = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
+  }
+  else
+  {
+    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
+  }
+  Node modPart = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, halfPow2);
   Node twice   = d_nm->mkNode(Kind::MULT, d_two, modPart);
   return d_nm->mkNode(Kind::SUB, twice, x);
+}
+
+Node PIntBlaster::bvlshrSym(Node x, Node y, Node k)
+{
+  Node pow2y = mkPow2Sym(y);
+  Node pow2k = mkPow2Sym(k);
+  Node intTerm = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, x, pow2y);
+  Node innerCond = d_nm->mkNode(Kind::EQUAL, pow2y, d_zero);
+  Node innerThen = d_nm->mkNode(Kind::SUB, pow2k, d_one);
+  Node inner = d_nm->mkNode(Kind::ITE, innerCond, innerThen, intTerm);
+  Node outerCond = d_nm->mkNode(Kind::EQUAL, pow2k, d_zero);
+  Node outerElse = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, inner, pow2k);
+  return d_nm->mkNode(Kind::ITE, outerCond, inner, outerElse);
 }
 
 // Node PIntBlaster::utsSym(Node k, Node x)
@@ -694,6 +788,58 @@ void PIntBlaster::addRangeConstraints(Node e,
 void PIntBlaster::addAdmConstraints(Node e,
                                     std::vector<TrustNode>& lemmas)
 {
+  // Walk recursively so quantifier scope can be tracked. Constraints whose
+  // free variables include any of the bound kappas in the surrounding
+  // quantifier(s) must be routed to that quantifier's guard rather than
+  // the top-level lemma list — otherwise those bound variables escape
+  // their scope and the printer/preprocessor capture them via a free
+  // skolem of the same name.
+  std::vector<Node> quantStack;
+  std::unordered_set<Node> visited;
+
+  // For each quantifier on the stack, gather its TRULY bound integer
+  // kappa variables (BOUND_VARIABLE nodes registered by registerBoundKappas).
+  // When the union-find lets a bound PBV variable reuse a free class
+  // kappa, d_kappaMap[bvar] holds that free skolem — those skolems are
+  // not in scope of the quantifier and must not be treated as bound here.
+  auto getBoundKappasOf = [&](Node q) -> std::unordered_set<Node> {
+    std::unordered_set<Node> result;
+    if (q.getNumChildren() < 1) return result;
+    for (const Node& bvar : q[0])
+    {
+      if (bvar.getType().isPbv())
+      {
+        auto it = d_kappaMap.find(bvar);
+        if (it != d_kappaMap.end())
+        {
+          Node kappa = (*it).second;
+          if (kappa.getKind() == Kind::BOUND_VARIABLE)
+          {
+            result.insert(kappa);
+          }
+        }
+      }
+    }
+    return result;
+  };
+
+  // True iff `n` syntactically contains any node from `targets`.
+  auto containsAny = [](Node n,
+                        const std::unordered_set<Node>& targets) -> bool {
+    if (targets.empty()) return false;
+    std::unordered_set<Node> seen;
+    std::vector<Node> stack{n};
+    while (!stack.empty())
+    {
+      Node x = stack.back();
+      stack.pop_back();
+      if (!seen.insert(x).second) continue;
+      if (targets.count(x)) return true;
+      for (const Node& c : x) stack.push_back(c);
+    }
+    return false;
+  };
+
   // Helper to add a lemma once. Rewrite first so admissibility constraints
   // that are now trivially true after kappa-equivalence-class allocation
   // (e.g. (= κ κ) for two PBV operands that share a class) get dropped
@@ -701,6 +847,29 @@ void PIntBlaster::addAdmConstraints(Node e,
   auto addOnce = [&](Node constr) {
     Node simplified = rewrite(constr);
     if (simplified.isConst() && simplified.getConst<bool>()) return;
+
+    // If `simplified` mentions any bound kappa from a surrounding quantifier,
+    // route it to the innermost such quantifier's guard.
+    for (auto rit = quantStack.rbegin(); rit != quantStack.rend(); ++rit)
+    {
+      auto bk = getBoundKappasOf(*rit);
+      if (containsAny(simplified, bk))
+      {
+        d_quantAdmConstraints[*rit].push_back(simplified);
+        Trace("pint-blaster")
+            << "ADM (in-quant): " << simplified << std::endl;
+
+        // Recover the value of the bound kappa from a solved-form
+        // equality `(= bound_kappa free_expr)` (or its mirror) and
+        // assert `free_expr > 0` at top level. Without this, kappa
+        // positivity stays inside the quantifier and gets pulled into
+        // the negated form as a free disjunct (`κ ≤ 0`) that the solver
+        // can satisfy by picking widths where no valid bound x exists,
+        // producing a vacuous SAT.
+        return;
+      }
+    }
+
     if (!d_rangeAssertions.contains(simplified))
     {
       d_rangeAssertions.insert(simplified);
@@ -709,39 +878,42 @@ void PIntBlaster::addAdmConstraints(Node e,
     }
   };
 
-  std::unordered_set<Node> visited;
-  std::vector<Node> toVisit = {e};
-
-  while (!toVisit.empty())
-  {
-    Node current = toVisit.back();
-    toVisit.pop_back();
-    if (!visited.insert(current).second) continue;
-
+  std::function<void(Node)> walk = [&](Node current) {
+    if (!visited.insert(current).second) return;
     Kind k = current.getKind();
 
     // Paper Fig. fig:type, function runtype:
     //   x  -> runbw(x) > 0           (bit-widths are strictly positive)
-    if (current.isVar()
-        && current.getType().isPbv()
-        && current.getKind() != Kind::BOUND_VARIABLE)
+    //
+    // Bound PBV variables also get this positivity, because their kappa
+    // is now a top-level free term (a class skolem, see
+    // registerBoundKappas). The only kappas we cannot assert about at
+    // top level are integer BOUND_VARIABLE nodes — which after the
+    // registerBoundKappas change shouldn't appear, but the guard is
+    // kept defensively.
+    if (current.isVar() && current.getType().isPbv())
     {
       Node kappa = computeKappa(current);
-      addOnce(d_nm->mkNode(Kind::GT, kappa, d_zero));
+      if (kappa.getKind() != Kind::BOUND_VARIABLE)
+      {
+        addOnce(d_nm->mkNode(Kind::GT, kappa, d_zero));
+      }
     }
 
     //   int_to_pbv(k, t)  ->  k > 0
+    // Route through computeKappa so that `k = (pbvsize V)` is resolved to
+    // the integer kappa skolem rather than left as a PBV-theory call.
     if (k == Kind::INT_TO_PBV)
     {
-      addOnce(d_nm->mkNode(Kind::GT, current[0], d_zero));
+      addOnce(d_nm->mkNode(Kind::GT, computeKappa(current), d_zero));
     }
 
     //   extract(t, i, j)  ->  0 <= j <= i < runbw(t)
     if (k == Kind::PBV_EXTRACT)
     {
       Node t = current[0];
-      Node i = current[1];
-      Node j = current[2];
+      Node i = normalizeWidthExpr(current[1]);
+      Node j = normalizeWidthExpr(current[2]);
       Node kappaT = computeKappa(t);
       addOnce(d_nm->mkNode(Kind::LEQ, d_zero, j));
       addOnce(d_nm->mkNode(Kind::LEQ, j, i));
@@ -751,7 +923,7 @@ void PIntBlaster::addAdmConstraints(Node e,
     //   zero_extend(n, t) / sign_extend(n, t)  ->  n >= 0
     if (k == Kind::PBV_ZERO_EXTEND || k == Kind::PBV_SIGN_EXTEND)
     {
-      addOnce(d_nm->mkNode(Kind::LEQ, d_zero, current[0]));
+      addOnce(d_nm->mkNode(Kind::LEQ, d_zero, normalizeWidthExpr(current[0])));
     }
 
     // Equal-width binary/n-ary PBV operators: emit κ(child_0) = κ(child_i)
@@ -822,11 +994,24 @@ void PIntBlaster::addAdmConstraints(Node e,
       addOnce(d_nm->mkNode(Kind::EQUAL, k2, k3));
     }
 
-    for (const Node& child : current)
+    if (k == Kind::FORALL || k == Kind::EXISTS)
     {
-      toVisit.push_back(child);
+      quantStack.push_back(current);
+      // Walk only the body — the bound-var list itself contains
+      // BOUND_VARIABLEs that don't need admissibility reasoning here.
+      walk(current[1]);
+      quantStack.pop_back();
     }
-  }
+    else
+    {
+      for (const Node& child : current)
+      {
+        walk(child);
+      }
+    }
+  };
+
+  walk(e);
 }
 
 // ============================================================================
@@ -852,13 +1037,28 @@ void PIntBlaster::registerBoundKappas(Node n)
         if (bvar.getType().isPbv()
             && d_kappaMap.find(bvar) == d_kappaMap.end())
         {
-          std::stringstream ss;
-          ss << bvar;
-          Node kappa = NodeManager::mkBoundVar(ss.str() + "_kappa",
-                                               d_nm->integerType());
-          d_kappaMap[bvar] = kappa;
+          // The width of a bound PBV variable is always a TOP-LEVEL
+          // integer term, never a quantified BoundVar. We have two
+          // sub-cases:
+          //
+          //  (a) Union-find has unified bvar with a free PBV term (this
+          //      catches the common `forall x. x op y` shape via the
+          //      equal-width binary-op rule in buildKappaUnionFind):
+          //      reuse that class's existing free kappa skolem so the
+          //      widths are syntactically identified.
+          //
+          //  (b) No admissibility tie was discovered (e.g. bvar appears
+          //      only inside structural ops like pconcat): allocate a
+          //      fresh top-level kappa skolem for bvar's own class.
+          //      Any admissibility equation involving κ_bvar is then
+          //      enforced as a top-level constraint between free terms.
+          //
+          // Either way, the kappa is non-bound, the standard kappa>0
+          // positivity is emitted by addAdmConstraints, and no escape
+          // through the negated existential is possible.
+          Node kappa = getOrCreateKappa(bvar);
           Trace("pint-blaster")
-              << "BOUND-KAPPA: " << bvar << " => " << kappa << std::endl;
+              << "BOUND-KAPPA-FREE: " << bvar << " => " << kappa << std::endl;
         }
       }
     }
@@ -988,15 +1188,25 @@ Node PIntBlaster::translateWithChildren(
       //     matching widths whenever this pattern is wrapped in int_to_pbv).
       //   * t == (x mod pow2(k))    — already mod'd at the same width
       //   * t == piand(k, _, _)     — piand result is bounded by its width arg
+      // Helpers that recognize `pow2(e)` in either of the two encodings the
+      // PBV→Int blaster may produce: EXP form `(** 2 e)` (default) or
+      // POW2 form `(int.pow2 e)` (--pbv-to-int-use-pow2).
+      auto isPow2Of = [&](TNode n, TNode e) {
+        return (n.getKind() == Kind::EXP && n[0] == d_two && n[1] == e)
+               || (n.getKind() == Kind::POW2 && n[0] == e);
+      };
+      auto isPow2Any = [&](TNode n) {
+        return (n.getKind() == Kind::EXP && n[0] == d_two)
+               || n.getKind() == Kind::POW2;
+      };
       bool inRange = (t == d_zero) || (t == d_one) || (t == k);
       if (!inRange && t.getKind() == Kind::SUB && t.getNumChildren() == 2
-          && t[0].getKind() == Kind::EXP && t[0][0] == d_two
-          && t[1] == d_one)
+          && isPow2Any(t[0]) && t[1] == d_one)
       {
         inRange = true;
       }
       if (!inRange && t.getKind() == Kind::INTS_MODULUS_TOTAL
-          && t[1].getKind() == Kind::EXP && t[1][0] == d_two && t[1][1] == k)
+          && isPow2Of(t[1], k))
       {
         inRange = true;
       }
@@ -1196,8 +1406,26 @@ Node PIntBlaster::translateWithChildren(
     // ---- shift operations --------------------------------------------------
     case Kind::PBV_SHL:
     {
+      Node k1 = computeKappa(original[0]);
+      // Match smt-switch's minimum_sign peephole:
+      //   bvshl( (_ bv1 k), bvsub( (_ bvk k), (_ bv1 k) ) ) = (_ bv1 k) << (k-1)
+      // PBV constants in cvc5 take the form INT_TO_PBV(width, value), so the
+      // pattern is INT_TO_PBV(k, 1) for `(_ bv1 k)` and INT_TO_PBV(k, k) for
+      // `(_ bvk k)` (value equals width).
+      bool isOne0 = original[0].getKind() == Kind::INT_TO_PBV
+                    && original[0][1] == d_one;
+      bool subPat = original[1].getKind() == Kind::PBV_SUB
+                    && original[1][0].getKind() == Kind::INT_TO_PBV
+                    && original[1][0][0] == original[1][0][1]
+                    && original[1][1].getKind() == Kind::INT_TO_PBV
+                    && original[1][1][1] == d_one;
+      if (isOne0 && subPat)
+      {
+        Node kMinus1 = d_nm->mkNode(Kind::SUB, k1, d_one);
+        returnNode = mkPow2Sym(kMinus1);
+        break;
+      }
       // t1 << t2  =  (CONV(t1) * pow2(CONV(t2))) mod pow2(κ(t1))
-      Node k1      = computeKappa(original[0]);
       Node shifted = d_nm->mkNode(Kind::MULT,
                                   translated_children[0],
                                   mkPow2Sym(translated_children[1]));
@@ -1206,39 +1434,71 @@ Node PIntBlaster::translateWithChildren(
     }
     case Kind::PBV_LSHR:
     {
-      // t1 >>_l t2  =  CONV(t1) div pow2(CONV(t2))
-      // (Range constraints guarantee t2 < k, so if t2 >= k the result is 0.)
-      returnNode = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
-                                translated_children[0],
-                                mkPow2Sym(translated_children[1]));
+      Node k1 = computeKappa(original[0]);
+      returnNode =
+          bvlshrSym(translated_children[0], translated_children[1], k1);
       break;
     }
     case Kind::PBV_ASHR:
     {
-      // Arithmetic right shift: fill vacated bits with the sign bit.
-      //   if CONV(t1) < pow2(k-1):   result = t1 div pow2(t2)          [MSB=0]
-      //   if CONV(t1) >= pow2(k-1):  result = pow2(k)-1 - ((pow2(k)-1-t1) div pow2(t2))  [MSB=1]
-      Node k        = computeKappa(original[0]);
-      Node pow2k    = mkPow2Sym(k);
-      Node kMinus1  = d_nm->mkNode(Kind::SUB, k, d_one);
-      Node signedMin = mkPow2Sym(kMinus1);
-      Node pow2shift = mkPow2Sym(translated_children[1]);
+      // Match smt-switch PrePBVWalker rewrite:
+      //   ite( (extract s m-1 m-1) == 0,
+      //        (bvlshr s t),
+      //        (bvnot (bvlshr (bvnot s) t)) )
+      // where m = κ(s). bvlshr uses the wrapped integer form (bvlshrSym),
+      // matching the abstract walker's default lshr translation.
+      Node k       = computeKappa(original[0]);
+      Node kMinus1 = d_nm->mkNode(Kind::SUB, k, d_one);
+      Node s       = translated_children[0];
+      Node t       = translated_children[1];
+      Node allOnes = d_nm->mkNode(Kind::SUB, mkPow2Sym(k), d_one);
 
-      // Unsigned (MSB=0) branch
-      Node unsignedResult = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
-                                         translated_children[0],
-                                         pow2shift);
-      // Signed (MSB=1) branch: ~(~t1 >> t2)
-      Node allOnes   = d_nm->mkNode(Kind::SUB, pow2k, d_one);
-      Node complement = d_nm->mkNode(Kind::SUB, allOnes, translated_children[0]);
-      Node shiftedComplement = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
-                                            complement, pow2shift);
-      Node signedResult = d_nm->mkNode(Kind::SUB, allOnes, shiftedComplement);
+      // (extract s m-1 m-1) = (s div pow2(m-1)) mod 2
+      Node msb = d_nm->mkNode(
+          Kind::INTS_MODULUS_TOTAL,
+          d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, s, mkPow2Sym(kMinus1)),
+          d_two);
+      Node msbZero = d_nm->mkNode(Kind::EQUAL, msb, d_zero);
 
-      Node isSigned = d_nm->mkNode(Kind::GEQ, translated_children[0], signedMin);
-      returnNode = d_nm->mkNode(Kind::ITE, isSigned, signedResult, unsignedResult);
+      // (bvlshr s t) using the wrapped form
+      Node lshrS = bvlshrSym(s, t, k);
+
+      // (bvnot (bvlshr (bvnot s) t))
+      //   bvnot(s) = pow2(m) - (s + 1) = allOnes - s
+      Node notS    = d_nm->mkNode(Kind::SUB, allOnes, s);
+      Node lshrNot = bvlshrSym(notS, t, k);
+      // bvnot(lshrNot) = allOnes - lshrNot
+      Node notLshrNot = d_nm->mkNode(Kind::SUB, allOnes, lshrNot);
+
+      returnNode = d_nm->mkNode(Kind::ITE, msbZero, lshrS, notLshrNot);
       break;
     }
+
+    // case Kind::PBV_ASHR:
+    // {
+    //   // Arithmetic right shift: fill vacated bits with the sign bit.
+    //   //   if CONV(t1) < pow2(k-1):   result = t1 div pow2(t2)          [MSB=0]
+    //   //   if CONV(t1) >= pow2(k-1):  result = pow2(k)-1 - ((pow2(k)-1-t1) div pow2(t2))  [MSB=1]
+    //   Node k        = computeKappa(original[0]);
+    //   Node pow2k    = mkPow2Sym(k);
+    //   Node kMinus1  = d_nm->mkNode(Kind::SUB, k, d_one);
+    //   Node signedMin = mkPow2Sym(kMinus1);
+    //   Node pow2shift = mkPow2Sym(translated_children[1]);
+
+    //   // Unsigned (MSB=0) branch
+    //   Node unsignedResult = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
+    //                                      translated_children[0],
+    //                                      pow2shift);
+    //   // Signed (MSB=1) branch: ~(~t1 >> t2)
+    //   Node allOnes   = d_nm->mkNode(Kind::SUB, pow2k, d_one);
+    //   Node complement = d_nm->mkNode(Kind::SUB, allOnes, translated_children[0]);
+    //   Node shiftedComplement = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
+    //                                         complement, pow2shift);
+    //   Node signedResult = d_nm->mkNode(Kind::SUB, allOnes, shiftedComplement);
+    //   Node isSigned = d_nm->mkNode(Kind::GEQ, translated_children[0], signedMin);
+    //   returnNode = d_nm->mkNode(Kind::ITE, isSigned, signedResult, unsignedResult);
+    //   break;
+    // }
 
     // ---- structural operations ---------------------------------------------
     case Kind::PBV_CONCAT:
@@ -1253,16 +1513,29 @@ Node PIntBlaster::translateWithChildren(
     }
     case Kind::PBV_EXTRACT:
     {
-      // t[i:j]  =  (CONV(t) div pow2(j)) mod pow2(i - j + 1)
-      // translated_children[0] = CONV(t),  [1] = i,  [2] = j
-      Node i      = translated_children[1];
-      Node j      = translated_children[2];
-      Node width  = d_nm->mkNode(
-          Kind::ADD, d_nm->mkNode(Kind::SUB, i, j), d_one);
-      Node divRes = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL,
-                                 translated_children[0],
-                                 mkPow2Sym(j));
-      returnNode  = modPow2Sym(divRes, width);
+      // Match smt-switch AbstractPBVWalker::extract(x, i, j):
+      //   j == 0 && i == 0:   x mod 2
+      //   j == 0:             x mod pow2(i + 1)
+      //   else:               (x div pow2(j)) mod pow2(i - j + 1)
+      Node x = translated_children[0];
+      Node i = translated_children[1];
+      Node j = translated_children[2];
+      if (j == d_zero && i == d_zero)
+      {
+        returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, d_two);
+      }
+      else if (j == d_zero)
+      {
+        Node iPlusOne = d_nm->mkNode(Kind::ADD, i, d_one);
+        returnNode = modPow2Sym(x, iPlusOne);
+      }
+      else
+      {
+        Node width = d_nm->mkNode(
+            Kind::ADD, d_nm->mkNode(Kind::SUB, i, j), d_one);
+        Node divRes = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, x, mkPow2Sym(j));
+        returnNode = modPow2Sym(divRes, width);
+      }
       break;
     }
     case Kind::PBV_ZERO_EXTEND:
@@ -1274,17 +1547,22 @@ Node PIntBlaster::translateWithChildren(
     }
     case Kind::PBV_SIGN_EXTEND:
     {
-      // sign_extend(n, t):
-      //   if CONV(t) >= pow2(κ(t)-1):  (pow2(n)-1)*pow2(κ(t)) + CONV(t)
-      //   else:                         CONV(t)
-      // translated_children[0] = n,  [1] = CONV(t)
-      Node n        = translated_children[0];
-      Node xp       = translated_children[1];
-      Node k        = computeKappa(original[1]);
-      Node kMinus1  = d_nm->mkNode(Kind::SUB, k, d_one);
-      Node signedMin = mkPow2Sym(kMinus1);
-      // MSB is 1 iff xp >= pow2(k-1)
-      Node msbOne   = d_nm->mkNode(Kind::GEQ, xp, signedMin);
+      // Match smt-switch PrePBVWalker rewrite:
+      //   ite( (extract x w-1 w-1) == 1,
+      //        concat(max_int_n, x),    // (pow2(n)-1)*pow2(w) + x
+      //        concat(0_n, x) )         // = x
+      // After the abstract walker translates:
+      //   (extract x w-1 w-1) = (x div pow2(w-1)) mod 2
+      // translated_children[0] = n (extension width), [1] = CONV(t)
+      Node n       = translated_children[0];
+      Node xp      = translated_children[1];
+      Node k       = computeKappa(original[1]);
+      Node kMinus1 = d_nm->mkNode(Kind::SUB, k, d_one);
+      Node msb = d_nm->mkNode(
+          Kind::INTS_MODULUS_TOTAL,
+          d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, xp, mkPow2Sym(kMinus1)),
+          d_two);
+      Node msbOne = d_nm->mkNode(Kind::EQUAL, msb, d_one);
       // Extension = (pow2(n) - 1) * pow2(k) + xp
       Node extension = d_nm->mkNode(
           Kind::ADD,
@@ -1325,6 +1603,9 @@ Node PIntBlaster::translateWithChildren(
     case Kind::FORALL:
     case Kind::EXISTS:
     {
+      // Match smt-switch exactly: for each bound PBV variable x of width k,
+      // add only the per-var guard  0 <= x_int  /\  x_int < pow2(k).
+      // No k>0 conjunct, no extra binder for kappa, no admissibility folding.
       Node oldVarList = original[0];
       std::vector<Node> newBVars;
       std::vector<Node> guards;
@@ -1336,17 +1617,15 @@ Node PIntBlaster::translateWithChildren(
         newBVars.push_back(bvarTranslated);
         if (bvar.getType().isPbv())
         {
-          // Bound kappa was registered by registerBoundKappas pre-pass.
           Assert(d_kappaMap.find(bvar) != d_kappaMap.end());
           Node kappa = d_kappaMap[bvar].get();
-          newBVars.push_back(kappa);
           Node g = d_nm->mkNode(Kind::AND,
-              {d_nm->mkNode(Kind::GT, kappa, d_zero),
-               d_nm->mkNode(Kind::LEQ, d_zero, bvarTranslated),
+              {d_nm->mkNode(Kind::LEQ, d_zero, bvarTranslated),
                d_nm->mkNode(Kind::LT, bvarTranslated, mkPow2Sym(kappa))});
           guards.push_back(g);
         }
       }
+
       Node body = translated_children[1];
       Node newBody;
       if (guards.empty())
@@ -1501,15 +1780,12 @@ bool PIntBlaster::childrenTypesChanged(Node n)
 
 Node PIntBlaster::rmModIfRedundant(Node node, Node modValue)
 {
-  // Recursively strip every  `(_ mod modValue)`  anywhere in the subtree.
-  //
-  // CAUTION (soundness): this is generally unsound. Only ADD, SUB, MULT
-  // and ITE distribute over mod, so stripping inner mods inside other
-  // operators (division, comparisons, uninterpreted functions, etc.)
-  // changes the value of the expression. Enabled here per user request —
-  // assumes the surrounding PBV pipeline only emits inner mods in places
-  // where mod-distribution holds. If a regression appears, narrow the set
-  // of recursed kinds (see git history for the prior, kind-gated version).
+  // Recursively strip every  `(_ mod modValue)`  inside contexts where mod
+  // distributes — i.e. when the surrounding expression is in [-p, p) - safe
+  // operators ADD, SUB, MULT, NEG, or ITE branches.  Mod does NOT distribute
+  // through EXP's exponent (2^(x mod p) ≠ 2^x mod p), nor through division,
+  // PIAND, comparisons, EQUAL, or arbitrary UFs, so we must not descend into
+  // those operands.
   //
   // Also folds 0 * _ → 0 at any depth.
   if (node.getKind() == Kind::INTS_MODULUS_TOTAL && node[1] == modValue)
@@ -1521,13 +1797,23 @@ Node PIntBlaster::rmModIfRedundant(Node node, Node modValue)
     return node;
   }
   Kind k = node.getKind();
+  bool distributes = (k == Kind::ADD || k == Kind::SUB || k == Kind::MULT
+                      || k == Kind::NEG || k == Kind::ITE);
+  if (!distributes)
+  {
+    return node;
+  }
   std::vector<Node> kids;
   kids.reserve(node.getNumChildren());
   bool changed = false;
   bool sawZero = false;
-  for (const Node& c : node)
+  for (uint32_t i = 0; i < node.getNumChildren(); ++i)
   {
-    Node nc = rmModIfRedundant(c, modValue);
+    const Node& c = node[i];
+    // ITE: only recurse into the branches (1, 2).  The condition is Boolean
+    // and stripping integer mods inside it would change comparison results.
+    bool recurse = !(k == Kind::ITE && i == 0);
+    Node nc = recurse ? rmModIfRedundant(c, modValue) : c;
     if (nc != c) changed = true;
     if (k == Kind::MULT && nc == d_zero) sawZero = true;
     kids.push_back(nc);
