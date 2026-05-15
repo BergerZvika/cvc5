@@ -91,6 +91,38 @@ void Pow2Solver::checkInitialRefine()
     Node even = nm->mkNode(Kind::EQUAL, mod2, d_zero);
     conj.push_back(nm->mkNode(Kind::IMPLIES, xgt0, even));
 
+    // Optional base-case pivots: give the SAT engine concrete values to try
+    // for small x. Mirrors ExpSolver's analogous t=0 / s=1 axioms; without
+    // them the value-based CEGAR loop can fail to converge on PBV-derived
+    // benchmarks where x (the bit-width) is free.
+    if (options().arith.nlExtPow2ZeroAxiom)
+    {
+      // x = 0 -> pow2(x) = 1
+      conj.push_back(nm->mkNode(Kind::IMPLIES,
+                                nm->mkNode(Kind::EQUAL, i[0], d_zero),
+                                i.eqNode(d_one)));
+    }
+    if (options().arith.nlExtPow2OneAxiom)
+    {
+      // x = 1 -> pow2(x) = 2
+      conj.push_back(nm->mkNode(Kind::IMPLIES,
+                                nm->mkNode(Kind::EQUAL, i[0], d_one),
+                                i.eqNode(d_two)));
+    }
+
+    // Optional div2 analog: x >= 2 -> 2 div pow2(x) = 0. For pow2 the base
+    // is fixed at 2 (vs ExpSolver's parametric s), so we only need the
+    // t >= 2 case. Helps prune model proposals where pow2(x) is given a
+    // tiny abstract value while x is large.
+    if (options().arith.nlExtPow2DivAxiom)
+    {
+      Node xgeq2 = nm->mkNode(Kind::GEQ, i[0], d_two);
+      Node twoDivI = nm->mkNode(Kind::INTS_DIVISION, d_two, i);
+      conj.push_back(nm->mkNode(Kind::IMPLIES,
+                                xgeq2,
+                                nm->mkNode(Kind::EQUAL, twoDivI, d_zero)));
+    }
+
     Node lem = nm->mkAnd(conj);
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; INIT_REFINE"
                         << std::endl;
@@ -170,10 +202,12 @@ void Pow2Solver::checkFullRefine()
         d_im.addPendingLemma(
             lem, InferenceId::ARITH_NL_POW2_MONOTONE_REFINE, nullptr, true);
       }
-      else if (y <= 0 && y < x && pow2x <= pow2y)
+      else if (y >= 0 && y < x && pow2x <= pow2y)
       {
         // 0 <= y /\ y < x => pow2(y) < pow2(x)
-        Node assumption = nm->mkNode(Kind::LT, m[0], n[0]);
+        Node _lt_x = nm->mkNode(Kind::LT, m[0], n[0]);
+        Node ygeq0 = nm->mkNode(Kind::LEQ, d_zero, m[0]);
+        Node assumption = nm->mkNode(Kind::AND, ygeq0, _lt_x);
         Node conclusion = nm->mkNode(Kind::LT, m, n);
         Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
         d_im.addPendingLemma(

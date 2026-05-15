@@ -232,36 +232,38 @@ void ExpSolver::checkFullRefine() {
         d_im.addPendingLemma(
             lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
       }
-      // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_x /\ t_x < t_y => exp(s_x, t_x) * s_x <= exp(s_y,t_y)
-    //   if (model_s >= 2 && model_t >= 0 && model_s == model_sy && model_t < model_ty && expx * model_s > expy) {
-    //     Node sxgeq2 = nm->mkNode(Kind::LEQ, d_two, n[0]);
-    //     Node txgeq0 = nm->mkNode(Kind::LEQ, d_zero, n[1]);
-    //     Node sxgeqsy = nm->mkNode(Kind::EQUAL, n[0], m[0]);
-    //     Node tx_lt_ty = nm->mkNode(Kind::LT, n[1], m[1]);
-    //     Node assumption_pos = nm->mkNode(Kind::AND, sxgeq2, txgeq0);
-    //     Node assumption_xgt = nm->mkNode(Kind::AND, tx_lt_ty, sxgeqsy);
-    //     Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
-    //     Node xmulsx = nm->mkNode(Kind::MULT, n, n[0]);
-    //     Node conclusion = nm->mkNode(Kind::LEQ, xmulsx, m);
-    //     Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-    //     d_im.addPendingLemma(
-    //         lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
-    //   }
-    //   // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_y /\ t_x > t_y => exp(s_x, t_x) >= exp(s_y,t_y) * s_y
-    //   if (model_s >= 2 && model_ty >= 0 && model_s == model_sy && model_t > model_ty && expx < expy * model_ty) {
-    //     Node sxgeq2 = nm->mkNode(Kind::LEQ, d_two, n[0]);
-    //     Node tygeq0 = nm->mkNode(Kind::LEQ, d_zero, m[1]);
-    //     Node sxgeqsy = nm->mkNode(Kind::EQUAL, n[0], m[0]);
-    //     Node ty_lt_tx = nm->mkNode(Kind::LT, m[1], n[1]);
-    //     Node assumption_pos = nm->mkNode(Kind::AND, sxgeq2, tygeq0);
-    //     Node assumption_xgt = nm->mkNode(Kind::AND, ty_lt_tx, sxgeqsy);
-    //     Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
-    //     Node ymulsy = nm->mkNode(Kind::MULT, m, m[0]);
-    //     Node conclusion = nm->mkNode(Kind::LEQ, ymulsy, n);
-    //     Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-    //     d_im.addPendingLemma(
-    //         lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
-    //   }
+      if (options().arith.nlExtExpInductionAxioms) {
+        // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_x /\ t_x < t_y => exp(s_x, t_x) * s_x <= exp(s_y,t_y)
+        if (model_s >= 2 && model_t >= 0 && model_s == model_sy && model_t < model_ty && expx * model_s > expy) {
+          Node sxgeq2 = nm->mkNode(Kind::LEQ, d_two, n[0]);
+          Node txgeq0 = nm->mkNode(Kind::LEQ, d_zero, n[1]);
+          Node sxgeqsy = nm->mkNode(Kind::EQUAL, n[0], m[0]);
+          Node tx_lt_ty = nm->mkNode(Kind::LT, n[1], m[1]);
+          Node assumption_pos = nm->mkNode(Kind::AND, sxgeq2, txgeq0);
+          Node assumption_xgt = nm->mkNode(Kind::AND, tx_lt_ty, sxgeqsy);
+          Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
+          Node xmulsx = nm->mkNode(Kind::MULT, n, n[0]);
+          Node conclusion = nm->mkNode(Kind::LEQ, xmulsx, m);
+          Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
+          d_im.addPendingLemma(
+              lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
+        }
+        // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_y /\ t_x > t_y => exp(s_x, t_x) >= exp(s_y,t_y) * s_y
+        if (model_s >= 2 && model_ty >= 0 && model_s == model_sy && model_t > model_ty && expx < expy * model_ty) {
+          Node sxgeq2 = nm->mkNode(Kind::LEQ, d_two, n[0]);
+          Node tygeq0 = nm->mkNode(Kind::LEQ, d_zero, m[1]);
+          Node sxgeqsy = nm->mkNode(Kind::EQUAL, n[0], m[0]);
+          Node ty_lt_tx = nm->mkNode(Kind::LT, m[1], n[1]);
+          Node assumption_pos = nm->mkNode(Kind::AND, sxgeq2, tygeq0);
+          Node assumption_xgt = nm->mkNode(Kind::AND, ty_lt_tx, sxgeqsy);
+          Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
+          Node ymulsy = nm->mkNode(Kind::MULT, m, m[0]);
+          Node conclusion = nm->mkNode(Kind::LEQ, ymulsy, n);
+          Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
+          d_im.addPendingLemma(
+              lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
+        }
+      }
     }
 
     // bound: s >= 2 /\ v >= 7 /\ v = t => exp(s,t) > vt + v^2

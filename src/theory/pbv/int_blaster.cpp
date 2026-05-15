@@ -698,17 +698,18 @@ Node PIntBlaster::modPow2Sym(Node n, Node k)
 Node PIntBlaster::utsSym(Node k, Node x)
 {
   // uts(k, z) = 2 * (z mod pow2(k-1)) - z
-  // With --pbv-to-int-uts-half-pow2: encode pow2(k-1) as pow2(k) div 2,
-  // avoiding a (- k 1) argument to pow2 (relevant for the POW2 operator path,
-  // which is undefined on negative exponents).
+  // Default (flag off): encode pow2(k-1) as pow2(k) div 2, avoiding a
+  // (- k 1) argument to pow2 (relevant for the POW2 operator path, which
+  // is undefined on negative exponents).
+  // --pbv-to-int-uts-sat25 switches to pow2(k-1) directly (the SAT'25 form).
   Node halfPow2;
-  if (options().smt.pbvToIntUtsHalfPow2)
+  if (options().smt.pbvToIntUtsSat25)
   {
-    halfPow2 = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
+    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
   }
   else
   {
-    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
+    halfPow2 = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
   }
   Node modPart = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, halfPow2);
   Node twice   = d_nm->mkNode(Kind::MULT, d_two, modPart);
@@ -1514,13 +1515,22 @@ Node PIntBlaster::translateWithChildren(
     case Kind::PBV_EXTRACT:
     {
       // Match smt-switch AbstractPBVWalker::extract(x, i, j):
+      //   i == j:             (x div pow2(j)) mod 2          (1-bit extract)
       //   j == 0 && i == 0:   x mod 2
       //   j == 0:             x mod pow2(i + 1)
       //   else:               (x div pow2(j)) mod pow2(i - j + 1)
       Node x = translated_children[0];
       Node i = translated_children[1];
       Node j = translated_children[2];
-      if (j == d_zero && i == d_zero)
+      if (i == j)
+      {
+        // 1-bit extract — avoid the symbolic pow2(1) by going direct to `mod 2`.
+        Node div = (j == d_zero)
+                       ? x
+                       : d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, x, mkPow2Sym(j));
+        returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, div, d_two);
+      }
+      else if (j == d_zero && i == d_zero)
       {
         returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, d_two);
       }

@@ -406,12 +406,12 @@ name   = "SMT Layer"
   help       = "use the internal POW2 operator instead of (** 2 k) when translating PBV to integer"
 
 [[option]]
-  name       = "pbvToIntUtsHalfPow2"
+  name       = "pbvToIntUtsSat25"
   category   = "expert"
-  long       = "pbv-to-int-uts-half-pow2"
+  long       = "pbv-to-int-uts-sat25"
   type       = "bool"
   default    = "false"
-  help       = "in PBV-to-int utsSym, encode pow2(k-1) as pow2(k) div 2 instead of pow2(k-1)"
+  help       = "use the sat25 utsSym encoding in PBV-to-int: encode using pow2(k-1) directly. Default encoding (flag off) is pow2(k) div 2"
 
 [[option]]
   name       = "BVAndIntegerGranularity"

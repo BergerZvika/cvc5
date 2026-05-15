@@ -419,6 +419,38 @@ name   = "Arithmetic Theory"
   help       = "enables non-standard extensions of the arithmetic solver"
 
 [[option]]
+  name       = "nlExtPow2ZeroAxiom"
+  category   = "expert"
+  long       = "nl-ext-pow2-zero-axiom"
+  type       = "bool"
+  default    = "false"
+  help       = "emit initial-refine axiom x=0 => pow2(x)=1 for the POW2 nl-ext solver"
+
+[[option]]
+  name       = "nlExtPow2OneAxiom"
+  category   = "expert"
+  long       = "nl-ext-pow2-one-axiom"
+  type       = "bool"
+  default    = "false"
+  help       = "emit initial-refine axiom x=1 => pow2(x)=2 for the POW2 nl-ext solver"
+
+[[option]]
+  name       = "nlExtPow2DivAxiom"
+  category   = "expert"
+  long       = "nl-ext-pow2-div-axiom"
+  type       = "bool"
+  default    = "false"
+  help       = "emit initial-refine axiom x>=2 => 2 div pow2(x) = 0 for the POW2 nl-ext solver (analog of ExpSolver's div2)"
+
+[[option]]
+  name       = "nlExtExpInductionAxioms"
+  category   = "expert"
+  long       = "nl-ext-exp-induction-axioms"
+  type       = "bool"
+  default    = "true"
+  help       = "emit the two induction lemmas for EXP: base exp(s,0)=1 and step t>=1 => exp(s,t) = s*exp(s,t-1) (use --no-nl-ext-exp-induction-axioms to disable)"
+
+[[option]]
   name       = "nlExtTfTangentPlanes"
   category   = "regular"
   long       = "nl-ext-tf-tplanes"
