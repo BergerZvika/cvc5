@@ -163,8 +163,10 @@ Result SmtDriverSingleCall::checkSatNext(preprocessing::AssertionPipeline& ap)
   // preprocess
   d_smt.preprocess(ap);
 
-  if (options().base.preprocessOnly)
+  if (options().base.preprocessOnly || options().smt.dumpIntBlast)
   {
+    // --dump-int-blast emits the translated benchmark during preprocessing
+    // (see ProcessAssertions) and, like --preprocess-only, does not solve.
     return Result(Result::UNKNOWN, UnknownExplanation::REQUIRES_FULL_CHECK);
   }
 

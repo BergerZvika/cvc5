@@ -382,12 +382,18 @@ name   = "SMT Layer"
 [[option.mode.IAND]]
   name = "iand"
   help = "Translate bvand to the iand operator"
+[[option.mode.PIAND]]
+  name = "piand"
+  help = "Translate bvand to the piand operator (parametric iand), using the concrete bit-width as the width argument"
 [[option.mode.BV]]
   name = "bv"
   help = "Translate bvand back to bit-vectors"
 [[option.mode.BITWISE]]
   name = "bitwise"
   help = "Introduce a UF operator for bvand, and eagerly add bitwise lemmas"
+[[option.mode.PBV]]
+  name = "pbv"
+  help = "Lift BV input to PBV and translate using the PBV int-blaster (PIntBlaster)"
 
 [[option]]
   name       = "bvToIntUsePow2"
@@ -406,12 +412,46 @@ name   = "SMT Layer"
   help       = "use the internal POW2 operator instead of (** 2 k) when translating PBV to integer"
 
 [[option]]
-  name       = "pbvToIntUtsSat25"
+  name       = "pbvUtsWithK"
   category   = "expert"
-  long       = "pbv-to-int-uts-sat25"
+  long       = "pbv-uts-with-k"
   type       = "bool"
   default    = "false"
-  help       = "use the sat25 utsSym encoding in PBV-to-int: encode using pow2(k-1) directly. Default encoding (flag off) is pow2(k) div 2"
+  help       = "in the PBV-to-int utsSym encoding, use the full-k form pow2(k)/exp(2,k) (as pow2(k) div 2) instead of the default pow2(k-1)/exp(2,k-1) sat25 form. Off by default (default = pow2(k-1))."
+
+[[option]]
+  name       = "dumpIntBlast"
+  category   = "expert"
+  long       = "dump-int-blast"
+  type       = "bool"
+  default    = "false"
+  help       = "after int-blasting (bv-to-int / pbv-to-int), print the translated benchmark (UFNIA with EXP as '**', piand, int.pow2/mod_total) to the regular output channel and skip solving. Reserved-prefix (@/.) skolem names are renamed so the dump re-parses."
+
+[[option]]
+  name       = "pbvToIntPartialMod"
+  category   = "expert"
+  long       = "pbv-to-int-partial-mod"
+  type       = "bool"
+  default    = "false"
+  help       = "in the PBV-to-int preprocessing translation, use the partial INTS_MODULUS instead of INTS_MODULUS_TOTAL when reducing mod 2^k (divisors are always positive, so this only changes how the arithmetic solver handles the mod term). Disabled by default."
+
+[[option]]
+  name       = "analyzeExpInstances"
+  category   = "expert"
+  long       = "analyze-exp-instances=MODE"
+  type       = "AnalyzeExpInstancesMode"
+  default    = "NONE"
+  help       = "after translation, optionally rewrite integer EXP power instances (any logic)"
+  help_mode  = "EXP-power instance analysis modes."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Disabled (default; exp-analyzer pass not run)."
+[[option.mode.REWRITE]]
+  name = "rewrite"
+  help = "Translate every constant-base power instance to the constant-offset-related instance (same base) with the most occurrences (no report)."
+[[option.mode.REWRITE_REPORT]]
+  name = "rewrite-report"
+  help = "Print the numbered power-instance report, then apply the rewrite."
 
 [[option]]
   name       = "BVAndIntegerGranularity"

@@ -92,6 +92,33 @@ TrustNode PIntBlaster::trustedIntBlast(Node n,
   Assert(n == rewrite(n));
   Trace("pint-blaster") << "trustedIntBlast: " << n << std::endl;
 
+  // Early-out for pure-BV input: the pbv-to-int pass runs unconditionally,
+  // but on a QF_BV assertion with no PBV term anywhere there is nothing to
+  // translate. Without this, the default branch in translateWithChildren
+  // would force BV results to Int and emit `ubv_to_int(...)`, which is not
+  // a legal QF_BV atom.
+  {
+    std::unordered_set<Node> seen;
+    std::vector<Node> st{n};
+    bool hasPbv = false;
+    while (!st.empty() && !hasPbv)
+    {
+      Node m = st.back();
+      st.pop_back();
+      if (!seen.insert(m).second) continue;
+      if (m.getType().isPbv())
+      {
+        hasPbv = true;
+        break;
+      }
+      for (const Node& c : m) st.push_back(c);
+    }
+    if (!hasPbv)
+    {
+      return TrustNode::null();
+    }
+  }
+
   // Step 0 — pre-register bound kappas for every quantifier in n. This must
   // happen before computeKappa is invoked on any bound PBV variable;
   // otherwise the default branch in computeKappa would emit a top-level
@@ -540,6 +567,52 @@ void PIntBlaster::buildKappaUnionFind(Node n)
       if (!sa.isNull() && !sb.isNull()) kappaUnion(sa, sb);
     }
 
+    // Explicit-kappa pin: `(= (pbvsize V) ek)` (or symmetric) lets us treat
+    // `ek` as the kappa for V's whole equivalence class, instead of
+    // allocating a fresh `_k` skolem. We accept any non-PBV_SIZE-bearing
+    // expression — typically an integer constant from the BV→PBV lifter.
+    if (k == Kind::EQUAL && cur.getNumChildren() == 2
+        && cur[0].getType().isInteger())
+    {
+      auto isPbvSizeOfLeaf = [](Node x) -> Node {
+        if (x.getKind() == Kind::PBV_SIZE && x.getNumChildren() == 1
+            && x[0].isVar() && x[0].getType().isPbv())
+        {
+          return x[0];
+        }
+        return Node::null();
+      };
+      auto mentionsPbvSize = [](Node ek) -> bool {
+        std::vector<Node> st{ek};
+        while (!st.empty())
+        {
+          Node m = st.back();
+          st.pop_back();
+          if (m.getKind() == Kind::PBV_SIZE) return true;
+          for (const Node& kid : m) st.push_back(kid);
+        }
+        return false;
+      };
+      Node sizeVar;
+      Node ek;
+      if (!(sizeVar = isPbvSizeOfLeaf(cur[0])).isNull())
+      {
+        ek = cur[1];
+      }
+      else if (!(sizeVar = isPbvSizeOfLeaf(cur[1])).isNull())
+      {
+        ek = cur[0];
+      }
+      if (!sizeVar.isNull() && !mentionsPbvSize(ek))
+      {
+        Node rep = kappaFind(sizeVar);
+        if (d_kappaClassExplicit.find(rep) == d_kappaClassExplicit.end())
+        {
+          d_kappaClassExplicit[rep] = ek;
+        }
+      }
+    }
+
     for (const Node& c : cur)
     {
       stack.push_back(c);
@@ -558,6 +631,20 @@ Node PIntBlaster::computeKappa(Node t)
   if (it != d_kappaMap.end())
   {
     return (*it).second;
+  }
+
+  // Bit-vector-typed terms have a fixed, concrete width (e.g. a QF_UFBV
+  // function returning `(_ BitVec 10)` whose result is then fed into a PBV
+  // operator such as extract). Their κ is simply that width as an integer
+  // constant — there is no symbolic kappa to compute. Handling them here
+  // keeps mixed BV/PBV terms (produced by lifting BV applications whose
+  // operator stays bit-vector-typed) from falling through to the
+  // Unimplemented default below.
+  if (t.getType().isBitVector())
+  {
+    Node w = d_nm->mkConstInt(Rational(t.getType().getBitVectorSize()));
+    d_kappaMap[t] = w;
+    return w;
   }
 
   Node result;
@@ -601,10 +688,20 @@ Node PIntBlaster::computeKappa(Node t)
     }
     // t[i:j]: κ = (i - j + 1), but indices may be `(pbvsize V)` expressions
     // that the integer solver treats as uninterpreted unless normalized.
-    // t1 ○ t2: κ = κ(t1) + κ(t2)
+    // t1 ○ … ○ tn: κ = κ(t1) + … + κ(tn). PBV_CONCAT is n-ary, and
+    // computeKappa runs over the raw (un-binarized) term in the RANGE/ADM
+    // walks, so we must sum *every* operand — summing only the first two
+    // would under-count the width of a 3+-way concat and make the
+    // equal-width admissibility constraint `(= κ_expected κ_concat)` false.
     case Kind::PBV_CONCAT:
     {
-      result = d_nm->mkNode(Kind::ADD, computeKappa(t[0]), computeKappa(t[1]));
+      std::vector<Node> kappas;
+      for (const Node& c : t)
+      {
+        kappas.push_back(computeKappa(c));
+      }
+      result = kappas.size() == 1 ? kappas[0]
+                                  : d_nm->mkNode(Kind::ADD, kappas);
       break;
     }
     // ite(cond, t2, t3): κ = κ(t2)
@@ -682,6 +779,22 @@ Node PIntBlaster::normalizeWidthExpr(Node n)
 
 Node PIntBlaster::mkPow2Sym(Node k)
 {
+  // When the exponent is a concrete non-negative integer constant (the common
+  // case once a width comes from a fixed `(_ BitVec w)` sort, as in QF_BV /
+  // QF_UFBV), fold `2^k` to the integer constant directly instead of leaving
+  // a symbolic `(** 2 w)` / `(int.pow2 w)` term for the rewriter to clean up.
+  if (k.isConst() && k.getType().isInteger())
+  {
+    Rational r = k.getConst<Rational>();
+    if (r.sgn() >= 0 && r.isIntegral())
+    {
+      Integer e = r.getNumerator();
+      if (e.fitsUnsignedInt())
+      {
+        return d_nm->mkConstInt(Rational(Integer(2).pow(e.getUnsignedInt())));
+      }
+    }
+  }
   // Default: (** 2 k). With --pbv-to-int-use-pow2: the internal POW2 operator.
   if (options().smt.pbvToIntUsePow2)
   {
@@ -690,28 +803,36 @@ Node PIntBlaster::mkPow2Sym(Node k)
   return d_nm->mkNode(Kind::EXP, d_two, k);
 }
 
+Kind PIntBlaster::modKind() const
+{
+  return options().smt.pbvToIntPartialMod ? Kind::INTS_MODULUS
+                                          : Kind::INTS_MODULUS_TOTAL;
+}
+
+Node PIntBlaster::mkMod(Node n, Node d) { return d_nm->mkNode(modKind(), n, d); }
+
 Node PIntBlaster::modPow2Sym(Node n, Node k)
 {
-  return d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, n, mkPow2Sym(k));
+  return mkMod(n, mkPow2Sym(k));
 }
 
 Node PIntBlaster::utsSym(Node k, Node x)
 {
   // uts(k, z) = 2 * (z mod pow2(k-1)) - z
-  // Default (flag off): encode pow2(k-1) as pow2(k) div 2, avoiding a
-  // (- k 1) argument to pow2 (relevant for the POW2 operator path, which
-  // is undefined on negative exponents).
-  // --pbv-to-int-uts-sat25 switches to pow2(k-1) directly (the SAT'25 form).
+  // Default (sat25 form): use pow2(k-1) directly, matching the SAT'25 paper.
+  // --pbv-uts-with-k switches to the full-k form pow2(k) div 2, avoiding a
+  // (- k 1) argument to pow2 (relevant for the POW2 operator path, which is
+  // undefined on negative exponents).
   Node halfPow2;
-  if (options().smt.pbvToIntUtsSat25)
-  {
-    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
-  }
-  else
+  if (options().smt.pbvUtsWithK)
   {
     halfPow2 = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
   }
-  Node modPart = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, halfPow2);
+  else
+  {
+    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
+  }
+  Node modPart = d_nm->mkNode(modKind(), x, halfPow2);
   Node twice   = d_nm->mkNode(Kind::MULT, d_two, modPart);
   return d_nm->mkNode(Kind::SUB, twice, x);
 }
@@ -725,7 +846,7 @@ Node PIntBlaster::bvlshrSym(Node x, Node y, Node k)
   Node innerThen = d_nm->mkNode(Kind::SUB, pow2k, d_one);
   Node inner = d_nm->mkNode(Kind::ITE, innerCond, innerThen, intTerm);
   Node outerCond = d_nm->mkNode(Kind::EQUAL, pow2k, d_zero);
-  Node outerElse = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, inner, pow2k);
+  Node outerElse = d_nm->mkNode(modKind(), inner, pow2k);
   return d_nm->mkNode(Kind::ITE, outerCond, inner, outerElse);
 }
 
@@ -1206,7 +1327,9 @@ Node PIntBlaster::translateWithChildren(
       {
         inRange = true;
       }
-      if (!inRange && t.getKind() == Kind::INTS_MODULUS_TOTAL
+      if (!inRange
+          && (t.getKind() == Kind::INTS_MODULUS_TOTAL
+              || t.getKind() == Kind::INTS_MODULUS)
           && isPow2Of(t[1], k))
       {
         inRange = true;
@@ -1335,9 +1458,7 @@ Node PIntBlaster::translateWithChildren(
     {
       // ite(CONV(t2) = 0,  CONV(t1),  CONV(t1) mod CONV(t2))
       Node isZero  = d_nm->mkNode(Kind::EQUAL, translated_children[1], d_zero);
-      Node remRes  = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL,
-                                  translated_children[0],
-                                  translated_children[1]);
+      Node remRes  = d_nm->mkNode(modKind(), translated_children[0], translated_children[1]);
       returnNode = d_nm->mkNode(Kind::ITE,
                                 isZero, translated_children[0], remRes);
       break;
@@ -1455,8 +1576,7 @@ Node PIntBlaster::translateWithChildren(
       Node allOnes = d_nm->mkNode(Kind::SUB, mkPow2Sym(k), d_one);
 
       // (extract s m-1 m-1) = (s div pow2(m-1)) mod 2
-      Node msb = d_nm->mkNode(
-          Kind::INTS_MODULUS_TOTAL,
+      Node msb = d_nm->mkNode(modKind(), 
           d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, s, mkPow2Sym(kMinus1)),
           d_two);
       Node msbZero = d_nm->mkNode(Kind::EQUAL, msb, d_zero);
@@ -1528,11 +1648,11 @@ Node PIntBlaster::translateWithChildren(
         Node div = (j == d_zero)
                        ? x
                        : d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, x, mkPow2Sym(j));
-        returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, div, d_two);
+        returnNode = d_nm->mkNode(modKind(), div, d_two);
       }
       else if (j == d_zero && i == d_zero)
       {
-        returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, d_two);
+        returnNode = d_nm->mkNode(modKind(), x, d_two);
       }
       else if (j == d_zero)
       {
@@ -1568,8 +1688,7 @@ Node PIntBlaster::translateWithChildren(
       Node xp      = translated_children[1];
       Node k       = computeKappa(original[1]);
       Node kMinus1 = d_nm->mkNode(Kind::SUB, k, d_one);
-      Node msb = d_nm->mkNode(
-          Kind::INTS_MODULUS_TOTAL,
+      Node msb = d_nm->mkNode(modKind(), 
           d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, xp, mkPow2Sym(kMinus1)),
           d_two);
       Node msbOne = d_nm->mkNode(Kind::EQUAL, msb, d_one);
@@ -1653,6 +1772,50 @@ Node PIntBlaster::translateWithChildren(
       }
       Node newVarList = d_nm->mkNode(Kind::BOUND_VAR_LIST, newBVars);
       returnNode = d_nm->mkNode(oldKind, newVarList, newBody);
+      break;
+    }
+
+    // ---- uninterpreted function application --------------------------------
+    case Kind::APPLY_UF:
+    {
+      // translated_children[0] is the translated function symbol (an Int→Int
+      // skolem produced by translateFunctionSymbol); the rest are the
+      // translated Int arguments. Rebuild the application over Ints.
+      returnNode = d_nm->mkNode(Kind::APPLY_UF, translated_children);
+
+      // The original application had a fixed width (BV) or symbolic width
+      // (PBV) range sort, so its translated Int value is bounded by the
+      // corresponding pow2. Emit `0 <= app < pow2(width)` unless the
+      // application mentions a bound variable (those range constraints are
+      // attached under the enclosing quantifier instead).
+      if (!expr::hasBoundVar(original))
+      {
+        TypeNode rt = original.getType();
+        Node width;
+        if (rt.isBitVector())
+        {
+          width = d_nm->mkConstInt(Rational(rt.getBitVectorSize()));
+        }
+        else if (rt.isPbv())
+        {
+          width = computeKappa(original);
+        }
+        if (!width.isNull())
+        {
+          Node range = d_nm->mkNode(
+              Kind::AND,
+              d_nm->mkNode(Kind::LEQ, d_zero, returnNode),
+              d_nm->mkNode(Kind::LT, returnNode, mkPow2Sym(width)));
+          Node simplified = rewrite(range);
+          if (!(simplified.isConst() && simplified.getConst<bool>())
+              && !d_rangeAssertions.contains(simplified))
+          {
+            d_rangeAssertions.insert(simplified);
+            lemmas.push_back(TrustNode::mkTrustLemma(simplified, this));
+            Trace("pint-blaster") << "RANGE(uf): " << simplified << std::endl;
+          }
+        }
+      }
       break;
     }
 
@@ -1798,7 +1961,9 @@ Node PIntBlaster::rmModIfRedundant(Node node, Node modValue)
   // those operands.
   //
   // Also folds 0 * _ → 0 at any depth.
-  if (node.getKind() == Kind::INTS_MODULUS_TOTAL && node[1] == modValue)
+  if ((node.getKind() == Kind::INTS_MODULUS_TOTAL
+       || node.getKind() == Kind::INTS_MODULUS)
+      && node[1] == modValue)
   {
     return rmModIfRedundant(node[0], modValue);
   }
@@ -1893,17 +2058,17 @@ Node PIntBlaster::reduceRedundantMods(Node n)
       // and strip every redundant inner `mod modValue` (any kind, any depth).
       // A 0*_ fold along the way collapses the whole mod to 0.
       bool rewritten = false;
-      if (k == Kind::INTS_MODULUS_TOTAL && newChildren.size() == 2)
+      if ((k == Kind::INTS_MODULUS_TOTAL || k == Kind::INTS_MODULUS)
+          && newChildren.size() == 2)
       {
         Node lhs = newChildren[0];
         Node modValue = newChildren[1];
         Node newLhs = rmModIfRedundant(lhs, modValue);
         if (newLhs != lhs)
         {
-          result = (newLhs == d_zero)
-                       ? d_zero
-                       : d_nm->mkNode(
-                           Kind::INTS_MODULUS_TOTAL, newLhs, modValue);
+          // preserve the original modulus kind (total vs partial)
+          result = (newLhs == d_zero) ? d_zero
+                                      : d_nm->mkNode(k, newLhs, modValue);
           rewritten = true;
         }
       }
@@ -1958,7 +2123,8 @@ void PIntBlaster::detectSelfSquaring(Node n, std::vector<TrustNode>& lemmas)
       {
         Node x = cur[side];
         Node y = cur[1 - side];
-        if (y.getKind() != Kind::INTS_MODULUS_TOTAL
+        if ((y.getKind() != Kind::INTS_MODULUS_TOTAL
+             && y.getKind() != Kind::INTS_MODULUS)
             || y.getNumChildren() != 2)
           continue;
         Node body = y[0];

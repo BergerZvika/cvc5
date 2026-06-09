@@ -33,6 +33,7 @@
 #include "preprocessing/passes/bv_to_bool.h"
 #include "preprocessing/passes/bv_to_int.h"
 #include "preprocessing/passes/pbv_to_int.h"
+#include "preprocessing/passes/exp_analyzer.h"
 #include "preprocessing/passes/extended_rewriter_pass.h"
 #include "preprocessing/passes/ff_bitsum.h"
 #include "preprocessing/passes/ff_disjunctive_bit.h"
@@ -132,6 +133,7 @@ PreprocessingPassRegistry::PreprocessingPassRegistry()
   registerPassInfo("int-to-bv", callCtor<IntToBV>);
   registerPassInfo("bv-to-int", callCtor<BVToInt>);
   registerPassInfo("pbv-to-int", callCtor<PBVToInt>);
+  registerPassInfo("exp-analyzer", callCtor<ExpAnalyzer>);
   registerPassInfo("ff-bitsum", callCtor<FfBitsum>);
   registerPassInfo("ff-disjunctive-bit", callCtor<FfDisjunctiveBit>);
   registerPassInfo("learned-rewrite", callCtor<LearnedRewrite>);

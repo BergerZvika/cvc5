@@ -55,6 +55,9 @@ class CommandExecutor
   /** Cache option value of parse-only option. */
   bool d_parseOnly;
 
+  /** Cache option value of dump-int-blast option. */
+  bool d_dumpIntBlast;
+
  public:
   CommandExecutor(std::unique_ptr<cvc5::Solver>& solver);
 

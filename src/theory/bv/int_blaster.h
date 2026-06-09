@@ -250,6 +250,13 @@ class IntBlaster : protected EnvObj, public ProofGenerator
   Node modpow2(Node n, uint32_t exponent);
 
   /**
+   * The integer-modulus kind used when reducing mod 2^k in the translation:
+   * INTS_MODULUS_TOTAL by default, or the partial INTS_MODULUS when
+   * --pbv-to-int-partial-mod is set.
+   */
+  Kind modKind() const;
+
+  /**
    * Returns true iff the type of at least
    * one child of n was changed by the translation.
    */

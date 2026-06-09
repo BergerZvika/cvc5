@@ -232,7 +232,40 @@ void ExpSolver::checkFullRefine() {
         d_im.addPendingLemma(
             lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
       }
-      if (options().arith.nlExtExpInductionAxioms) {
+      // DOUBLING: for adjacent EXP exponents with a common base,
+      // s_x = s_y /\ t_y = t_x + 1 => exp(s_y, t_y) = s_x * exp(s_x, t_x).
+      // Cheap algebraic successor relation that the bare monotonicity lemma
+      // above does not give. Gated by --nl-ext-exp-doubling (off by default).
+      if (options().arith.nlExtExpDoubling
+          && model_s == model_sy
+          && model_t >= 0 && model_ty == model_t + 1)
+      {
+        // skip if model already agrees
+        Integer expy_concrete = expy;
+        Integer expx_concrete = expx;
+        Node valExpyAbstract = d_model.computeAbstractModelValue(m);
+        if (valExpyAbstract.isConst())
+        {
+          expy_concrete =
+              valExpyAbstract.getConst<Rational>().getNumerator();
+        }
+        if (expy_concrete != expx_concrete * model_s)
+        {
+          Node sxEqSy = nm->mkNode(Kind::EQUAL, n[0], m[0]);
+          Node tySucc = nm->mkNode(
+              Kind::EQUAL, m[1], nm->mkNode(Kind::ADD, n[1], d_one));
+          Node assumDbl = nm->mkNode(Kind::AND, sxEqSy, tySucc);
+          Node sxTimesN = nm->mkNode(Kind::MULT, n[0], n);
+          Node conclDbl = nm->mkNode(Kind::EQUAL, m, sxTimesN);
+          Node dblLem = nm->mkNode(Kind::IMPLIES, assumDbl, conclDbl);
+          d_im.addPendingLemma(
+              dblLem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr,
+              true);
+        }
+      }
+      {
+        // Induction lemmas for EXP (base exp(s,0)=1 and step
+        // t>=1 => exp(s,t) = s*exp(s,t-1)), always emitted.
         // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_x /\ t_x < t_y => exp(s_x, t_x) * s_x <= exp(s_y,t_y)
         if (model_s >= 2 && model_t >= 0 && model_s == model_sy && model_t < model_ty && expx * model_s > expy) {
           Node sxgeq2 = nm->mkNode(Kind::LEQ, d_two, n[0]);

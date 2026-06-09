@@ -125,7 +125,8 @@ class ProcessAssertions : protected EnvObj
    */
   void dumpAssertionsToStream(std::ostream& os,
                               const preprocessing::AssertionPipeline& ap,
-                              const std::string& logicOverride = "");
+                              const std::string& logicOverride = "",
+                              bool renameReserved = false);
   /** apply pass */
   preprocessing::PreprocessingPassResult applyPass(
       const std::string& pass, preprocessing::AssertionPipeline& ap);

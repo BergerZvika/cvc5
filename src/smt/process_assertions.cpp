@@ -26,6 +26,8 @@
 #include "options/smt_options.h"
 #include "options/strings_options.h"
 #include "options/uf_options.h"
+#include "expr/node_algorithm.h"
+#include "expr/skolem_manager.h"
 #include "preprocessing/assertion_pipeline.h"
 #include "preprocessing/preprocessing_pass_registry.h"
 #include "printer/printer.h"
@@ -202,6 +204,11 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   // Assertions MUST BE guaranteed to be rewritten by this point
   applyPass("rewrite", ap);
   applyPass("pbv-to-int", ap);
+  if (options().smt.analyzeExpInstances
+      != options::AnalyzeExpInstancesMode::NONE)
+  {
+    applyPass("exp-analyzer", ap);
+  }
 
   // Convert non-top-level Booleans to bit-vectors of size 1
   if (options().bv.boolToBitvector != options::BoolToBVMode::OFF)
@@ -382,6 +389,28 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
     outPA << ";; post-asserts end" << std::endl;
   }
 
+  // --dump-int-blast: emit the translated benchmark (UFNIA with EXP/piand) to
+  // the regular output channel as a clean, re-parseable SMT2 file (no marker
+  // comments, reserved-prefix skolem names renamed). Solving is skipped in
+  // SmtDriverSingleCall::checkSatNext.
+  if (options().smt.dumpIntBlast)
+  {
+    std::string postLogic;
+    if (logicInfo().isTheoryEnabled(theory::THEORY_PBV))
+    {
+      LogicInfo li = logicInfo().getUnlockedCopy();
+      li.enableTheory(theory::THEORY_UF);
+      li.enableTheory(theory::THEORY_ARITH);
+      li.enableIntegers();
+      li.arithNonLinear();
+      li.disableTheory(theory::THEORY_PBV);
+      li.lock();
+      postLogic = li.getLogicString();
+    }
+    dumpAssertionsToStream(
+        options().base.out, ap, postLogic, /*renameReserved=*/true);
+  }
+
   return noConflict;
 }
 
@@ -487,7 +516,8 @@ void ProcessAssertions::dumpAssertions(const std::string& key,
 
 void ProcessAssertions::dumpAssertionsToStream(std::ostream& os,
                                                const AssertionPipeline& ap,
-                                               const std::string& logicOverride)
+                                               const std::string& logicOverride,
+                                               bool renameReserved)
 {
   PrintBenchmark pb(nodeManager(), Printer::getPrinter(os));
   std::vector<Node> assertions;
@@ -546,6 +576,56 @@ void ProcessAssertions::dumpAssertionsToStream(std::ostream& os,
   for (size_t i = 0, size = ap.size(); i < size; i++)
   {
     assertions.push_back(ap[i]);
+  }
+  // Optionally rename free symbols whose names start with a reserved SMT-LIB
+  // prefix ('@' or '.', used internally for skolems/purifications). Such names
+  // are rejected by the parser, so a dump that is meant to be re-read must
+  // substitute them with fresh, legally-named variables of the same type.
+  if (renameReserved)
+  {
+    NodeManager* nm = nodeManager();
+    std::unordered_set<Node> syms;
+    for (const Node& a : assertions) expr::getSymbols(a, syms);
+    for (const Node& d : defs) expr::getSymbols(d, syms);
+    // names already in use, so the rewritten names do not collide
+    std::unordered_set<std::string> used;
+    for (const Node& s : syms)
+    {
+      if (s.hasName()) used.insert(s.getName());
+    }
+    std::vector<Node> from, to;
+    for (const Node& s : syms)
+    {
+      if (!s.hasName()) continue;
+      const std::string& nm0 = s.getName();
+      if (nm0.empty() || (nm0[0] != '@' && nm0[0] != '.')) continue;
+      // sanitize: drop the leading reserved char, replace remaining '@'/'.'
+      std::string base = "bv2int_" + nm0.substr(1);
+      for (char& c : base)
+      {
+        if (c == '@' || c == '.') c = '_';
+      }
+      std::string fresh = base;
+      uint32_t ctr = 0;
+      while (used.find(fresh) != used.end())
+      {
+        fresh = base + "_" + std::to_string(ctr++);
+      }
+      used.insert(fresh);
+      from.push_back(s);
+      to.push_back(nm->getSkolemManager()->mkDummySkolem(fresh, s.getType()));
+    }
+    if (!from.empty())
+    {
+      for (Node& a : assertions)
+      {
+        a = a.substitute(from.begin(), from.end(), to.begin(), to.end());
+      }
+      for (Node& d : defs)
+      {
+        d = d.substitute(from.begin(), from.end(), to.begin(), to.end());
+      }
+    }
   }
   const std::string& logicStr =
       logicOverride.empty() ? logicInfo().getLogicString() : logicOverride;

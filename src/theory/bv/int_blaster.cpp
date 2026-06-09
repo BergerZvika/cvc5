@@ -131,10 +131,16 @@ Node IntBlaster::pow2(uint32_t k)
   return d_nm->mkConstInt(intpow2(k));
 }
 
+Kind IntBlaster::modKind() const
+{
+  return options().smt.pbvToIntPartialMod ? Kind::INTS_MODULUS
+                                          : Kind::INTS_MODULUS_TOTAL;
+}
+
 Node IntBlaster::modpow2(Node n, uint32_t exponent)
 {
   Node p2 = d_nm->mkConstInt(intpow2(exponent));
-  return d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, n, p2);
+  return d_nm->mkNode(modKind(), n, p2);
 }
 
 Node IntBlaster::makeBinary(Node n)
@@ -343,7 +349,7 @@ Node IntBlaster::translateWithChildren(
       uint32_t bvsize = original[0].getType().getBitVectorSize();
       Node mult = d_nm->mkNode(Kind::MULT, translated_children);
       Node p2 = pow2(bvsize);
-      returnNode = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, mult, p2);
+      returnNode = d_nm->mkNode(modKind(), mult, p2);
       break;
     }
     case Kind::BITVECTOR_UDIV:
@@ -364,7 +370,7 @@ Node IntBlaster::translateWithChildren(
     {
       // we use an ITE for the case where the second operand is 0.
       Node modNode =
-          d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, translated_children);
+          d_nm->mkNode(modKind(), translated_children);
       returnNode = d_nm->mkNode(
           Kind::ITE,
           d_nm->mkNode(Kind::EQUAL, translated_children[1], d_zero),
@@ -990,7 +996,7 @@ Node IntBlaster::createShiftNode(std::vector<Node> children,
     Node pow2Node = d_nm->mkNode(Kind::POW2, y);
     if (isLeftShift)
     {
-      return d_nm->mkNode(Kind::INTS_MODULUS_TOTAL,
+      return d_nm->mkNode(modKind(),
                           d_nm->mkNode(Kind::MULT, x, pow2Node),
                           pow2(bvsize));
     }
@@ -1007,7 +1013,7 @@ Node IntBlaster::createShiftNode(std::vector<Node> children,
   {
     if (isLeftShift)
     {
-      body = d_nm->mkNode(Kind::INTS_MODULUS_TOTAL,
+      body = d_nm->mkNode(modKind(),
                           d_nm->mkNode(Kind::MULT, x, pow2(i)),
                           pow2(bvsize));
     }
@@ -1115,6 +1121,12 @@ Node IntBlaster::createBVAndNode(Node x,
     Node iAndOp = d_nm->mkConst(IntAnd(bvsize));
     returnNode = d_nm->mkNode(Kind::IAND, iAndOp, x, y);
   }
+  else if (d_mode == options::SolveBVAsIntMode::PIAND)
+  {
+    // piand(k, x, y) where k is the concrete bit-width as an Int constant.
+    Node width = d_nm->mkConstInt(Rational(bvsize));
+    returnNode = d_nm->mkNode(Kind::PIAND, width, x, y);
+  }
   else if (d_mode == options::SolveBVAsIntMode::BV)
   {
     // translate the children back to BV
@@ -1180,14 +1192,14 @@ Node IntBlaster::createBVSubNode(Node x, Node y, uint32_t bvsize)
 {
   Node minus = d_nm->mkNode(Kind::SUB, x, y);
   Node p2 = pow2(bvsize);
-  return d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, minus, p2);
+  return d_nm->mkNode(modKind(), minus, p2);
 }
 
 Node IntBlaster::createBVAddNode(Node x, Node y, uint32_t bvsize)
 {
   Node plus = d_nm->mkNode(Kind::ADD, x, y);
   Node p2 = pow2(bvsize);
-  return d_nm->mkNode(Kind::INTS_MODULUS_TOTAL, plus, p2);
+  return d_nm->mkNode(modKind(), plus, p2);
 }
 
 Node IntBlaster::createBVNegNode(Node n, uint32_t bvsize)

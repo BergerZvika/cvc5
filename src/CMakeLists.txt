@@ -76,6 +76,8 @@ libcvc5_add_sources(
   preprocessing/passes/bv_to_int.h
   preprocessing/passes/pbv_to_int.cpp
   preprocessing/passes/pbv_to_int.h
+  preprocessing/passes/exp_analyzer.cpp
+  preprocessing/passes/exp_analyzer.h
   preprocessing/passes/extended_rewriter_pass.cpp
   preprocessing/passes/extended_rewriter_pass.h
   preprocessing/passes/ff_bitsum.cpp

@@ -142,6 +142,33 @@ void PIAndSolver::checkInitialRefine()
       Node i_leq_y = nm->mkNode(Kind::LEQ, i, y);
       conj.push_back(nm->mkNode(Kind::IMPLIES, y_geq_zero, i_leq_y));
 
+      // strict upper bound: k > 0 -> piand(k,x,y) < 2^k.
+      // Mirrors the unconditional iand bound iand(x,y) < 2^k. Without it the
+      // abstract piand value is unbounded above when x, y are large compound
+      // sums (as after int-blasting), and branch-and-bound never stabilizes.
+      // conj.push_back(
+      //     nm->mkNode(Kind::IMPLIES, k_gt_0, nm->mkNode(Kind::LT, i, twok)));
+
+      // modular upper bounds: piand(k,x,y) <= x mod 2^k and <= y mod 2^k.
+      // Tighter than range2/range3 above, which bound by the raw operands;
+      // x mod 2^k is always in [0, 2^k), so this is the bound that actually
+      // boxes the result regardless of how large x, y are.
+      // conj.push_back(nm->mkNode(Kind::LEQ, i, arg0Mod));
+      // conj.push_back(nm->mkNode(Kind::LEQ, i, arg1Mod));
+
+      // Extra initial-refine lemmas below are gated by --piand-lemmas=MODE.
+      // Each schema is enabled by ALL or by its specific mode.
+      options::PIAndLemmaMode plm = options().arith.piAndLemmaMode;
+
+      // diagonal: x = y -> piand(k,x,y) = x mod 2^k. Matches the iand
+      // init-refine lemma; pins the result exactly on the diagonal.
+      if (plm == options::PIAndLemmaMode::ALL
+          || plm == options::PIAndLemmaMode::DIAGONAL)
+      {
+        conj.push_back(
+            nm->mkNode(Kind::IMPLIES, x.eqNode(y), i.eqNode(arg0Mod)));
+      }
+
       // non-positive bitwidth: k <= 0 -> piand(k,x, y) = 0
       Node k_le_0 = nm->mkNode(Kind::LEQ, k, d_zero);
       conj.push_back(nm->mkNode(Kind::IMPLIES, k_le_0, i.eqNode(d_zero)));
@@ -156,6 +183,42 @@ void PIAndSolver::checkInitialRefine()
       Node arg0Mod2_eq_zero = nm->mkNode(Kind::EQUAL, arg0Mod2, d_zero);
       conj.push_back(nm->mkNode(
           Kind::IMPLIES, arg0Mod2_eq_zero, piand_mod_two.eqNode(d_zero)));
+
+      // CARRY: k > 0 /\ x,y in [0, 2^k) => 2*piand(k,x,y) <= x + y.
+      // Each bit of piand is 1 only when both x and y have a 1 there, so
+      // bit-by-bit min(b_x, b_y) <= (b_x + b_y)/2; summing gives the bound.
+      if (plm == options::PIAndLemmaMode::ALL
+          || plm == options::PIAndLemmaMode::CARRY)
+      {
+        Node two_i = nm->mkNode(Kind::MULT, d_two, i);
+        Node carry_bound = nm->mkNode(Kind::LEQ, two_i, plus);
+        Node carry_assum = nm->mkNode(Kind::AND, k_gt_0, x_range, y_range);
+        conj.push_back(nm->mkNode(Kind::IMPLIES, carry_assum, carry_bound));
+      }
+
+      // LSB equivalence: k > 0 => piand(k,x,y) mod 2 = (x mod 2)*(y mod 2).
+      // Strictly stronger than the two one-sided LSB implications above; the
+      // existing ones remain as cheap propagators.
+      if (plm == options::PIAndLemmaMode::ALL
+          || plm == options::PIAndLemmaMode::LSB)
+      {
+        Node lsb_prod = nm->mkNode(Kind::MULT, arg0Mod2, arg1Mod2);
+        Node lsb_eq = nm->mkNode(Kind::EQUAL, piand_mod_two, lsb_prod);
+        conj.push_back(nm->mkNode(Kind::IMPLIES, k_gt_0, lsb_eq));
+      }
+
+      // COMPLEMENT: k > 0 /\ x in [0, 2^k) /\ y = 2^k - 1 - x
+      //             => piand(k,x,y) = 0.
+      // Eager analogue of the existing checkFullRefine contradiction lemma.
+      if (plm == options::PIAndLemmaMode::ALL
+          || plm == options::PIAndLemmaMode::COMPLEMENT)
+      {
+        Node compl_rhs = nm->mkNode(Kind::SUB, twok_minus_one, x);
+        Node compl_eq = nm->mkNode(Kind::EQUAL, y, compl_rhs);
+        Node compl_assum = nm->mkNode(Kind::AND, k_gt_0, x_range, compl_eq);
+        conj.push_back(
+            nm->mkNode(Kind::IMPLIES, compl_assum, i.eqNode(d_zero)));
+      }
 
       // insert lemmas
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(Kind::AND, conj);
@@ -311,6 +374,59 @@ void PIAndSolver::checkFullRefine()
                                  InferenceId::ARITH_NL_PIAND_SYMETRY_REFINE,
                                  nullptr,
                                  true);
+          }
+
+          // WIDTH_MONOTONE (gated by --piand-lemmas): same operands at two
+          // different widths agree if both arguments fit in the narrower
+          // width. Requires syntactic equality of operands so the lemma is
+          // structurally sound under future rewrites.
+          options::PIAndLemmaMode plmF = options().arith.piAndLemmaMode;
+          if ((plmF == options::PIAndLemmaMode::ALL
+               || plmF == options::PIAndLemmaMode::WIDTH_MONOTONE)
+              && x == x2 && y == y2 && k != k2
+              && model_k > 0 && model_k2 > 0
+              && model_piand != model_piand2)
+          {
+            Integer narrow = model_k <= model_k2 ? model_k : model_k2;
+            // only fire when the model already places x, y inside the
+            // narrower width — otherwise the antecedent is false and the
+            // lemma carries no information.
+            Integer pow2narrow = Integer(2).pow(narrow.getUnsignedLong());
+            if (model_x >= 0 && model_x < pow2narrow
+                && model_y >= 0 && model_y < pow2narrow)
+            {
+              Node kNarrow = nm->mkNode(Kind::LEQ, k, k2);
+              Node kWide = nm->mkNode(Kind::LEQ, k2, k);
+              Node twokN = nm->mkNode(Kind::EXP, d_two, k);
+              Node twokW = nm->mkNode(Kind::EXP, d_two, k2);
+              Node xrgN = nm->mkNode(
+                  Kind::AND,
+                  nm->mkNode(Kind::GEQ, x, d_zero),
+                  nm->mkNode(Kind::LT, x, twokN));
+              Node yrgN = nm->mkNode(
+                  Kind::AND,
+                  nm->mkNode(Kind::GEQ, y, d_zero),
+                  nm->mkNode(Kind::LT, y, twokN));
+              Node xrgW = nm->mkNode(
+                  Kind::AND,
+                  nm->mkNode(Kind::GEQ, x, d_zero),
+                  nm->mkNode(Kind::LT, x, twokW));
+              Node yrgW = nm->mkNode(
+                  Kind::AND,
+                  nm->mkNode(Kind::GEQ, y, d_zero),
+                  nm->mkNode(Kind::LT, y, twokW));
+              // pick the direction whose narrower side matches the model
+              Node assumWM = model_k <= model_k2
+                                 ? nm->mkNode(Kind::AND, kNarrow, xrgN, yrgN)
+                                 : nm->mkNode(Kind::AND, kWide, xrgW, yrgW);
+              Node wm_lem =
+                  nm->mkNode(Kind::IMPLIES, assumWM, i.eqNode(n));
+              d_im.addPendingLemma(
+                  wm_lem,
+                  InferenceId::ARITH_NL_PIAND_SYMETRY_REFINE,
+                  nullptr,
+                  true);
+            }
           }
         }
       }

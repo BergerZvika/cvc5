@@ -130,8 +130,16 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
   /** Build: mkNode(Kind::EXP, 2, k)  — symbolic 2^k with Int-sort argument. */
   Node mkPow2Sym(Node k);
 
-  /** Build: n mod 2^k  = mkNode(INTS_MODULUS_TOTAL, n, EXP(2, k)). */
+  /** Build: n mod 2^k  = mkNode(modKind(), n, EXP(2, k)). */
   Node modPow2Sym(Node n, Node k);
+
+  /**
+   * The integer-modulus kind used throughout the translation: INTS_MODULUS_TOTAL
+   * by default, or the partial INTS_MODULUS when --pbv-to-int-partial-mod is set.
+   */
+  Kind modKind() const;
+  /** Build: mkNode(modKind(), n, d). */
+  Node mkMod(Node n, Node d);
 
   /**
    * Unsigned-to-signed conversion with symbolic bit-width k (Algorithm 3).

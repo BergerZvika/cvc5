@@ -443,12 +443,74 @@ name   = "Arithmetic Theory"
   help       = "emit initial-refine axiom x>=2 => 2 div pow2(x) = 0 for the POW2 nl-ext solver (analog of ExpSolver's div2)"
 
 [[option]]
-  name       = "nlExtExpInductionAxioms"
+  name       = "piAndLemmaMode"
   category   = "expert"
-  long       = "nl-ext-exp-induction-axioms"
+  long       = "piand-lemmas=MODE"
+  type       = "PIAndLemmaMode"
+  default    = "NONE"
+  help       = "select which extra PIAND lemmas to emit (default 'none', see --piand-lemmas=help)"
+  help_mode  = "Extra optional lemma schemas for the parametric integer-and (PIAND) nl-ext solver. Select 'all' to enable every schema, or a specific name to enable just one."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not emit any of the extra PIAND lemmas."
+[[option.mode.ALL]]
+  name = "all"
+  help = "Emit every extra PIAND lemma (diagonal, carry upper bound, LSB equivalence, complement, width-monotone)."
+[[option.mode.DIAGONAL]]
+  name = "diagonal"
+  help = "Emit only the initial-refine diagonal axiom: x=y => piand(k,x,y) = x mod 2^k."
+[[option.mode.CARRY]]
+  name = "carry"
+  help = "Emit only the initial-refine carry upper bound: 2*piand(k,x,y) <= x+y under x,y in [0,2^k)."
+[[option.mode.LSB]]
+  name = "lsb"
+  help = "Emit only the initial-refine LSB equivalence: piand(k,x,y) mod 2 = (x mod 2)*(y mod 2) under k>0."
+[[option.mode.COMPLEMENT]]
+  name = "complement"
+  help = "Emit only the initial-refine complement axiom: k>0 /\\ x+y = 2^k-1 => piand(k,x,y) = 0."
+[[option.mode.WIDTH_MONOTONE]]
+  name = "width-monotone"
+  help = "Emit only the pairwise full-refine width-narrowing lemma: x,y in [0,2^k1) /\\ k1<=k2 => piand(k1,x,y) = piand(k2,x,y)."
+
+[[option]]
+  name       = "expRewriteMode"
+  category   = "expert"
+  long       = "arith-exp-rewrites=MODE"
+  type       = "ExpRewriteMode"
+  default    = "NONE"
+  help       = "select which extra EXP rewrites to fire in the arithmetic rewriter (default 'none', see --arith-exp-rewrites=help)"
+  help_mode  = "Extra optional rewrite schemas for Kind::EXP. Run during normalization, deleting EXP nodes before the nl-ext solver sees them. Select 'all' to enable every schema, or a specific name to enable just one."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not emit any of the extra EXP rewrites."
+[[option.mode.ALL]]
+  name = "all"
+  help = "Emit every extra EXP rewrite except bounded unroll (const-arg cases and same-base product fusion). Unroll must be requested explicitly via 'unroll'."
+[[option.mode.CONST]]
+  name = "const"
+  help = "Emit only the partial-constant cases: EXP(s,0) -> 1, EXP(s,1) -> s, EXP(1,t) -> 1."
+[[option.mode.UNROLL]]
+  name = "unroll"
+  help = "Emit only the bounded unroll: EXP(s,c) -> s*...*s for constant 2 <= c <= --arith-exp-unroll-bound."
+[[option.mode.FUSE]]
+  name = "fuse"
+  help = "Emit only same-base product fusion: EXP(s,a)*EXP(s,b) -> EXP(s,a+b)."
+
+[[option]]
+  name       = "expRewriteUnrollBound"
+  category   = "expert"
+  long       = "arith-exp-unroll-bound=N"
+  type       = "uint64_t"
+  default    = "4"
+  help       = "upper bound on the constant exponent c that --arith-exp-rewrites=unroll will unroll EXP(s,c) into a product of c copies of s"
+
+[[option]]
+  name       = "nlExtExpDoubling"
+  category   = "expert"
+  long       = "nl-ext-exp-doubling"
   type       = "bool"
-  default    = "true"
-  help       = "emit the two induction lemmas for EXP: base exp(s,0)=1 and step t>=1 => exp(s,t) = s*exp(s,t-1) (use --no-nl-ext-exp-induction-axioms to disable)"
+  default    = "false"
+  help       = "emit the EXP doubling full-refine lemma: s_x=s_y /\\ t_y=t_x+1 => exp(s_y,t_y) = s_x*exp(s_x,t_x) (off by default)"
 
 [[option]]
   name       = "nlExtTfTangentPlanes"

@@ -56,7 +56,8 @@ CommandExecutor::CommandExecutor(std::unique_ptr<cvc5::Solver>& solver)
     : d_solver(solver),
       d_symman(new SymbolManager(d_solver->getTermManager())),
       d_result(),
-      d_parseOnly(false)
+      d_parseOnly(false),
+      d_dumpIntBlast(false)
 {
 }
 CommandExecutor::~CommandExecutor()
@@ -69,6 +70,9 @@ void CommandExecutor::storeOptionsAsOriginal()
   // cache the value of parse-only, which is set by the command line only
   // and thus will not change in a run.
   d_parseOnly = d_solver->getOptionInfo("parse-only").boolValue();
+  // cache dump-int-blast: in this mode we run commands (so preprocessing and
+  // the int-blast dump fire) but suppress result printing.
+  d_dumpIntBlast = d_solver->getOptionInfo("dump-int-blast").boolValue();
 }
 
 void CommandExecutor::setOptionInternal(const std::string& key,
@@ -236,6 +240,15 @@ bool CommandExecutor::solverInvoke(cvc5::Solver* solver,
       && dynamic_cast<DefineFunctionRecCommand*>(cmd) == nullptr)
   {
     return true;
+  }
+
+  // In dump-int-blast mode, invoke commands (triggering preprocessing and the
+  // int-blast benchmark dump) but do not print results (e.g. the check-sat
+  // "unknown"), so the dumped benchmark on the output channel stays clean.
+  if (d_dumpIntBlast)
+  {
+    cmd->invoke(solver, sm);
+    return !cmd->fail();
   }
 
   cmd->invokeAndPrintResult(solver, sm);
