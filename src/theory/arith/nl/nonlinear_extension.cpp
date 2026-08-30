@@ -61,7 +61,7 @@ NonlinearExtension::NonlinearExtension(Env& env, TheoryArith& containing)
       d_iandSlv(env, d_im, d_model),
       d_piandSlv(env, d_im, d_model),
       d_pow2Slv(env, d_im, d_model),
-      d_expSlv(env, d_im, d_model)
+      d_expSlv(env, d_astate, d_im, d_model)
 {
   d_extTheory.addFunctionKind(Kind::NONLINEAR_MULT);
   d_extTheory.addFunctionKind(Kind::EXPONENTIAL);

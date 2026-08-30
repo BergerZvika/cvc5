@@ -443,6 +443,14 @@ name   = "Arithmetic Theory"
   help       = "emit initial-refine axiom x>=2 => 2 div pow2(x) = 0 for the POW2 nl-ext solver (analog of ExpSolver's div2)"
 
 [[option]]
+  name       = "piAndLeanRefine"
+  category   = "expert"
+  long       = "piand-lean-refine"
+  type       = "bool"
+  default    = "false"
+  help       = "use a lean PIAND initial refinement that mirrors the iand init-refine: emit the tight bounds (0<=r, k>0=>r<2^k, r<=x mod 2^k, r<=y mod 2^k, x=y=>r=x mod 2^k, k<=0=>r=0) and DROP the heavy lemmas (max-bounds, min-x/y, idempotence, symmetry term, one-sided LSB). Off by default."
+
+[[option]]
   name       = "piAndLemmaMode"
   category   = "expert"
   long       = "piand-lemmas=MODE"
@@ -455,54 +463,95 @@ name   = "Arithmetic Theory"
   help = "Do not emit any of the extra PIAND lemmas."
 [[option.mode.ALL]]
   name = "all"
-  help = "Emit every extra PIAND lemma (diagonal, carry upper bound, LSB equivalence, complement, width-monotone)."
-[[option.mode.DIAGONAL]]
-  name = "diagonal"
-  help = "Emit only the initial-refine diagonal axiom: x=y => piand(k,x,y) = x mod 2^k."
+  help = "Emit every extra PIAND lemma (carry upper bound, LSB equivalence, width-monotone, lean init-refine)."
 [[option.mode.CARRY]]
   name = "carry"
   help = "Emit only the initial-refine carry upper bound: 2*piand(k,x,y) <= x+y under x,y in [0,2^k)."
 [[option.mode.LSB]]
   name = "lsb"
   help = "Emit only the initial-refine LSB equivalence: piand(k,x,y) mod 2 = (x mod 2)*(y mod 2) under k>0."
-[[option.mode.COMPLEMENT]]
-  name = "complement"
-  help = "Emit only the initial-refine complement axiom: k>0 /\\ x+y = 2^k-1 => piand(k,x,y) = 0."
 [[option.mode.WIDTH_MONOTONE]]
   name = "width-monotone"
   help = "Emit only the pairwise full-refine width-narrowing lemma: x,y in [0,2^k1) /\\ k1<=k2 => piand(k1,x,y) = piand(k2,x,y)."
+[[option.mode.LEAN]]
+  name = "lean"
+  help = "Emit the lean iand-style initial refinement (same lemmas as --piand-lean-refine): the tight bounds, dropping the heavy default init-refine lemmas (max-bounds, min-x/y, idempotence, symmetry term, one-sided LSB)."
 
 [[option]]
   name       = "expRewriteMode"
   category   = "expert"
-  long       = "arith-exp-rewrites=MODE"
-  type       = "ExpRewriteMode"
-  default    = "NONE"
-  help       = "select which extra EXP rewrites to fire in the arithmetic rewriter (default 'none', see --arith-exp-rewrites=help)"
-  help_mode  = "Extra optional rewrite schemas for Kind::EXP. Run during normalization, deleting EXP nodes before the nl-ext solver sees them. Select 'all' to enable every schema, or a specific name to enable just one."
-[[option.mode.NONE]]
-  name = "none"
-  help = "Do not emit any of the extra EXP rewrites."
-[[option.mode.ALL]]
-  name = "all"
-  help = "Emit every extra EXP rewrite except bounded unroll (const-arg cases and same-base product fusion). Unroll must be requested explicitly via 'unroll'."
-[[option.mode.CONST]]
-  name = "const"
-  help = "Emit only the partial-constant cases: EXP(s,0) -> 1, EXP(s,1) -> s, EXP(1,t) -> 1."
-[[option.mode.UNROLL]]
-  name = "unroll"
-  help = "Emit only the bounded unroll: EXP(s,c) -> s*...*s for constant 2 <= c <= --arith-exp-unroll-bound."
-[[option.mode.FUSE]]
-  name = "fuse"
-  help = "Emit only same-base product fusion: EXP(s,a)*EXP(s,b) -> EXP(s,a+b)."
+  long       = "arith-exp-rewrites=LIST"
+  type       = "std::string"
+  default    = "\"none\""
+  help       = "comma-separated list of extra Kind::EXP rewrite schemas, run during normalization and deleting EXP nodes before the nl-ext solver sees them. Combine freely, e.g. 'unroll,const' or 'compose,fuse-base'. Tokens: none (default, nothing); swine (the preprocessing of Frohn & Giesl Sect. 4.1: const,compose,fuse-base,unroll); const (EXP(s,0)->1, EXP(s,1)->s, EXP(1,t)->1); unroll (EXP(s,c) -> s*...*s for constant 2 <= c <= --arith-exp-unroll-bound, and EXP(s,c) -> 1 div (s*...*s) for -bound <= c <= -1, matching this solver's reading of a negative exponent); fuse-base (same-exponent product fusion EXP(s,a)*EXP(t,a) -> EXP(s*t,a)); compose (exponent composition EXP(EXP(x,y),z) -> EXP(x,y*z)); const-compose (const plus compose); fuse (same-base product fusion EXP(s,a)*EXP(s,b) -> EXP(s,a+b)) -- UNSOUND, named as such in Sect. 4.1 and unsound here too since EXP(s,1)*EXP(s,-1) is 0 for s >= 2 while EXP(s,0) is 1; excluded from both 'swine' and 'all'; all (every schema EXCEPT unroll, which must always be requested explicitly since it can blow up term size, and except fuse)."
 
 [[option]]
   name       = "expRewriteUnrollBound"
   category   = "expert"
   long       = "arith-exp-unroll-bound=N"
   type       = "uint64_t"
-  default    = "4"
+  default    = "2"
   help       = "upper bound on the constant exponent c that --arith-exp-rewrites=unroll will unroll EXP(s,c) into a product of c copies of s"
+
+[[option]]
+  name       = "expPhasing"
+  category   = "expert"
+  long       = "arith-exp-phasing"
+  type       = "bool"
+  default    = "false"
+  help       = "SwInE phasing (Frohn & Giesl, Sect. 5 / Alg. 3): alternate a sat-phase, whose candidate models are constrained by -2^b <= t <= 2^b on the exponent of every relevant exp(s,t), with an unconstrained unsat-phase, incrementing b (so the bound doubles) on every unsat-phase counterexample, which is discarded without refinement as in Alg. 3. This biases the search towards small exponents, so satisfiable instances with a small solution are found before the interpolation lemmas blow up. Each level-b bound is emitted as an equivalence 'g_b <=> -2^b <= t <= 2^b' with g_b fresh, and the SAT solver is asked to decide g_b true; the two phases are then the two sides of that case split. b starts at 1 and is not capped."
+
+[[option]]
+  name       = "expNegRecipMode"
+  category   = "expert"
+  long       = "arith-exp-neg-recip=MODE"
+  type       = "ExpNegRecipMode"
+  default    = "OFF"
+  help       = "select where to emit the EXP negative-reciprocal lemma exp(s,t) = 1 div exp(s,-t) (default 'off', see --arith-exp-neg-recip=help)"
+  help_mode  = "Controls the EXP negative-reciprocal lemma exp(s,t) = 1 div exp(s,-t), which relates a power to the reciprocal of its negated-exponent mirror."
+[[option.mode.OFF]]
+  name = "off"
+  help = "Do not emit the negative-reciprocal lemma."
+[[option.mode.INIT]]
+  name = "init"
+  help = "Emit the negative-reciprocal lemma once per EXP term as an initial-refine axiom."
+[[option.mode.REFINE]]
+  name = "refine"
+  help = "Emit the negative-reciprocal lemma during the full-refinement loop for each EXP term whose model value is incorrect."
+
+[[option]]
+  name       = "expBoundingMode"
+  category   = "expert"
+  long       = "arith-exp-bounding=MODE"
+  type       = "ExpBoundingMode"
+  default    = "INIT"
+  help       = "where the bounding lemmas selected by --arith-exp-lemmas=bounding are emitted (default 'init', see --arith-exp-bounding=help)"
+  help_mode  = "Where the bounding lemmas selected by --arith-exp-lemmas=bounding are emitted. Has no effect unless 'bounding' is named in that list.\n\nIn Frohn & Giesl, Bounding is one of the kinds ComputeLemmas produces, filtered by 'A does not satisfy psi' (Alg. 2 line 10) like every other kind. cvc5 instead emitted bnd2/bnd3/bnd5 once per term as initial-refine axioms, which means bnd5 -- whose conclusion exp(s,t) > s*t+1 is non-linear -- is asserted eagerly for every term whether the model needs it or not.\n\nNote bnd1 (t=0 => exp=1) and bnd4 (s=1 => exp=1) are emitted unconditionally at initial refine in every mode: they are cheap, linear, and independent of --arith-exp-lemmas."
+[[option.mode.INIT]]
+  name = "init"
+  help = "DEFAULT. Static axioms at initial refine, one batch per EXP term, whether or not any model violates them. The eager treatment, and the one the recorded benchmark baselines were taken with."
+[[option.mode.REFINE]]
+  name = "refine"
+  help = "A live refinement family: for each model-violating term, emit only those of bnd2/bnd3/bnd5 that the candidate model actually violates, from the full-refinement loop. This is the paper's treatment. It also stops bnd5's non-linear conclusion from entering the term graph for terms whose model value never violates it. NOTE: a lemma the model satisfies pointwise is never emitted, so an axiom that constrains the search only globally (bnd5 is the known case) effectively disappears in this mode."
+[[option.mode.BOTH]]
+  name = "both"
+  help = "Static axioms at initial refine AND the model-filtered family in the refinement loop. Strictly more lemmas than either; mainly useful for telling the two effects apart when benchmarking."
+
+[[option]]
+  name       = "expMonGeneral"
+  category   = "expert"
+  long       = "arith-exp-mon-general"
+  type       = "bool"
+  default    = "false"
+  help       = "use the general monotonicity lemma of Frohn & Giesl (`mon`, Sect. 4.2.2) for pairs of EXP terms instead of the same-base-only pair lemmas. The general form 2<=s1 /\\ s1<=s2 /\\ 0<=t1 /\\ t1<=t2 /\\ 1<=t2 /\\ (s1<s2 \\/ t1<t2) => exp(s1,t1) < exp(s2,t2) relates two powers with DIFFERENT bases, which the pair lemmas (which require s1=s2 in the candidate model) never do -- e.g. it is what refutes 1<x<y /\\ 0<z /\\ exp(x,z)<exp(y,z). It is strictly stronger than the two same-base lemmas, which are therefore suppressed while it is on, and it is scanned over every pair of EXP terms rather than only pairs whose first element is itself model-violating. Off by default: unlike the --arith-exp-lemmas families it is read directly rather than through that list, so turning it on changes the lemmas emitted on every EXP problem, and it suppresses two lemmas that are otherwise always on."
+
+[[option]]
+  name       = "expLemmasMode"
+  category   = "expert"
+  long       = "arith-exp-lemmas=LIST"
+  type       = "std::string"
+  default    = "\"none\""
+  help       = "comma-separated list of SwInE-style EXP refinement lemma families emitted by the ExpSolver (Frohn & Giesl). Combine freely, e.g. 'interpolation,prime' or 'symmetry,interpolation'. Tokens: none (default); symmetry (sym1-sym3, emitted in the full-refinement loop for model-violating terms); bounding (bnd2,bnd3,bnd5, emitted as initial-refine axioms by default and in the refinement loop under --arith-exp-bounding=refine: t=1 => exp(s,t)=s; s=0/\\t!=0 <=> exp(s,t)=0; and bnd5 in generalized form s>=2 /\\ t>=2 => exp(s,t) >= s*s*(t-1), which on the paper's region s,t>1 /\\ s+t>4 strictly implies the published s+t>4/\\s>1/\\t>1 => exp(s,t) > s*t+1 and additionally covers s=t=2 -- bnd1/bnd4 are already emitted unconditionally); prime (divisibility by the smallest distinguishing prime); induction (equality unrolling by the model exponent gap); interpolation (ip2 upper / ip3 lower bilinear bounds); compose (exp(exp(x,y),z) = exp(x,y*z)); fuse (guarded same-base fusion s1=s2 /\\ t1>=0 /\\ t2>=0 => exp(s1,t1)*exp(s2,t2) = exp(s1,t1+t2); valid here because cvc5's EXP is SMT-LIB '**', which agrees with ordinary exponentiation on non-negative exponents, unlike the s^|t| reading that makes the unguarded rewrite unsound in the paper. Emitted only when the fused term already exists in the problem or folds to a constant, so it introduces no new terms and cannot diverge. NOT implied by 'all' or 'all-lemmas': the token is shared with --arith-exp-rewrites=fuse, the UNSOUND rewrite, so it must always be named explicitly on either axis); all-lemmas (symmetry+bounding+prime+induction+interpolation, NOT compose, NOT fuse); all (every family including compose). Legacy aliases accepted for existing scripts: symmetry-interpolation = symmetry,interpolation; symmetry-refine = symmetry."
 
 [[option]]
   name       = "nlExtExpDoubling"

@@ -25,6 +25,8 @@
 #include "expr/node.h"
 #include "options/smt_options.h"
 #include "preprocessing/assertion_pipeline.h"
+#include "preprocessing/passes/int_order_facts.h"
+#include "preprocessing/preprocessing_pass_context.h"
 #include "util/integer.h"
 #include "util/rational.h"
 
@@ -184,7 +186,41 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
   Mode mode = options().smt.analyzeExpInstances;
   if (mode == Mode::NONE) return PreprocessingPassResult::NO_CONFLICT;
 
-  const bool report = mode == Mode::REWRITE_REPORT;
+  const bool report = mode == Mode::MULTIPLY_ONLY_REPORT
+                      || mode == Mode::COMMON_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_L3_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_L3_COMMON_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_L4_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+  // After the multiply-only merge, optionally relate the powers it could not
+  // fold (those whose exponent gap is symbolic). L3 and L4 are selectable
+  // independently so their contributions can be measured apart.
+  // l3-common: one factorization per upper power, pivoting on the most
+  // frequent lower power (see addRelationalLemmas). Under l3-common, L4 is
+  // emitted only for that same chosen pair, so it introduces no power term
+  // beyond the b^(y-x) that L3 already adds.
+  const bool l3Common = mode == Mode::MULTIPLY_ONLY_L3_COMMON
+                        || mode == Mode::MULTIPLY_ONLY_L3_COMMON_REPORT
+                        || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4
+                        || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT;
+  const bool doL3 = mode == Mode::MULTIPLY_ONLY_L3
+                    || mode == Mode::MULTIPLY_ONLY_L3_REPORT
+                    || l3Common
+                    || mode == Mode::MULTIPLY_ONLY_RELATE
+                    || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+  const bool doL4 = mode == Mode::MULTIPLY_ONLY_L4
+                    || mode == Mode::MULTIPLY_ONLY_L4_REPORT
+                    || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4
+                    || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT
+                    || mode == Mode::MULTIPLY_ONLY_RELATE
+                    || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+  const bool relate = doL3 || doL4 || l3Common;
+  // commonPivot: pivot on the most-frequent instance and divide smaller
+  // powers down (naive scheme). Otherwise pivot on the smallest exponent and
+  // only multiply up (exact).
+  const bool commonPivot =
+      mode == Mode::COMMON || mode == Mode::COMMON_REPORT;
 
   std::map<Node, uint64_t> counts;
   std::vector<Node> order;
@@ -215,13 +251,16 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
     }
   }
 
-  // Group constant-base EXP instances by (base, symbolic exponent part).
-  // Within each group the base c is fixed
-  // and every exponent is (S + const) for the same S, so all instances are
-  // constant-factor related via c^(S+a) = c^|a-b| * c^(S+b), and can be
-  // translated to a single representative: the instance with the most
-  // occurrences. Larger powers translate via MULT, smaller ones via DIV
-  // (exact, since c^|d| divides).
+  // Group EXP instances by (base, symbolic exponent part). Within each group
+  // the base b is fixed and every exponent is (S + const) for the same S, so
+  // all instances are related by b^(S+a) = b^(a-p) * b^(S+p) for the pivot
+  // offset p. Pivoting on the SMALLEST offset makes every a-p >= 0, so the
+  // factor b^(a-p) is always a non-negative power and every member rewrites
+  // via MULT (never division). The base may be:
+  //   * an integer constant c (any sign): factor is the constant c^(a-p);
+  //   * a symbolic term: factor is b^(a-p) built as a product of (a-p) copies
+  //     of b (capped to keep the product small).
+  // A non-integral constant base is skipped (no exact integer factor).
   NodeManager* nm = nodeManager();
 
   struct Member
@@ -229,8 +268,8 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
     Node node;
     Rational off;
   };
-  // key = (constant base c, symbolic exponent S). Insertion order of each
-  // vector follows `order`, so ties below break deterministically by first
+  // key = (base b, symbolic exponent S). Insertion order of each vector
+  // follows `order`, so ties below break deterministically by first
   // appearance.
   std::map<std::pair<Node, Node>, std::vector<Member>> groups;
   for (const Node& n : order)
@@ -238,25 +277,51 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
     Node base;
     TNode exp;
     asPower(n, base, exp);  // always true: order holds only power nodes
-    if (!base.isConst()) continue;
-    const Rational& c = base.getConst<Rational>();
-    if (!c.isIntegral() || c < Rational(2)) continue;  // need integer c >= 2
+    // Skip only bases we cannot form an exact integer factor for: a
+    // non-integral constant base. Constant integers (incl. negative) and
+    // symbolic bases are both kept.
+    if (base.isConst() && !base.getConst<Rational>().isIntegral()) continue;
     Rational off;
     Node sym = splitExp(exp, off);
     groups[{base, sym}].push_back({n, off});
   }
 
+  // Cap on the product length b*b*...*b used for a symbolic base, so a large
+  // exponent gap cannot blow the term up. Constant bases have no such limit
+  // (their factor is a single constant c^d) beyond the sanity bound below.
+  const Integer kMaxSymChain(256);
   std::unordered_map<Node, Node> sub;  // node-to-replace -> replacement
   for (auto& [key, members] : groups)
   {
     if (members.size() < 2) continue;
-    // c is integral and >= 2 (filtered above).
-    Integer cBase = key.first.getConst<Rational>().getNumerator();
-    // Pivot = the member with the most occurrences.
+    const Node& base = key.first;
+    const bool constBase = base.isConst();
+    // Pivot choice (see commonPivot above):
+    //  * default: the member with the SMALLEST exponent offset (ties -> most
+    //    occurrences). Every other member is then a LARGER power reached by
+    //    MULT only -- never pivot div b^d. That matters for solving: the
+    //    division form b^n div b loses the divisibility fact b | b^n, so an
+    //    identity like b*(b^n div b) = b^n never closes and the solver
+    //    diverges. Multiplying up keeps the rewrite exact.
+    //  * commonPivot: the member with the MOST occurrences (ties -> smallest
+    //    offset). Smaller powers are then rewritten by DIVIDING the pivot
+    //    down. Kept for A/B comparison against the default.
     size_t piv = 0;
     for (size_t i = 1; i < members.size(); ++i)
     {
-      if (counts[members[i].node] > counts[members[piv].node]) piv = i;
+      const uint64_t ci = counts[members[i].node];
+      const uint64_t cp = counts[members[piv].node];
+      bool better;
+      if (commonPivot)
+      {
+        better = ci > cp || (ci == cp && members[i].off < members[piv].off);
+      }
+      else
+      {
+        better = members[i].off < members[piv].off
+                 || (members[i].off == members[piv].off && ci > cp);
+      }
+      if (better) piv = i;
     }
     const Node& pivot = members[piv].node;
     const Rational& pOff = members[piv].off;
@@ -266,18 +331,36 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
       const Node& m = members[i].node;
       Rational d = members[i].off - pOff;  // exponent(m) - exponent(pivot)
       if (d.isZero()) continue;            // identical exponent value
+      // In the default (smallest) pivot mode d > 0 always; with commonPivot d
+      // may be negative (smaller power -> divide down).
+      Assert(commonPivot || d.sgn() > 0);
       Integer ad = d.getNumerator().abs();
-      // Skip absurd exponents (keeps the c^|d| constant sane).
-      if (ad > Integer(1000000)) continue;
-      Node factor = nm->mkConstInt(Rational(cBase.pow(ad.toUnsignedInt())));
+      // Build the factor b^|d| (a constant for a constant base, a product of
+      // |d| copies for a symbolic base, so the rewrite stays in-theory).
+      Node factor;
+      if (constBase)
+      {
+        // Skip absurd exponents (keeps the c^|d| constant sane).
+        if (ad > Integer(1000000)) continue;
+        Integer cBase = base.getConst<Rational>().getNumerator();
+        factor = nm->mkConstInt(Rational(cBase.pow(ad.toUnsignedInt())));
+      }
+      else
+      {
+        // Skip if |d| is too large to expand into a product.
+        if (ad > kMaxSymChain) continue;
+        uint32_t dd = ad.toUnsignedInt();
+        std::vector<Node> copies(dd, base);
+        factor = dd == 1 ? base : nm->mkNode(Kind::MULT, copies);
+      }
       if (d.sgn() > 0)
       {
-        // m is the larger power: c^(S+a) = c^|d| * c^(S+p)
+        // m is the larger power: b^(S+a) = b^|d| * b^(S+p)
         sub[m] = nm->mkNode(Kind::MULT, factor, pivot);
       }
       else
       {
-        // m is the smaller power: c^(S+a) = c^(S+p) div c^|d|
+        // m is the smaller power: b^(S+a) = b^(S+p) div b^|d|
         sub[m] = nm->mkNode(Kind::INTS_DIVISION_TOTAL, pivot, factor);
       }
     }
@@ -293,17 +376,234 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
     std::cout << ";; -----------------------------------------------------\n";
   }
 
-  if (sub.empty()) return PreprocessingPassResult::NO_CONFLICT;
-
-  std::unordered_map<TNode, Node> cache;
-  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+  if (!sub.empty())
   {
-    Node before = (*assertionsToPreprocess)[i];
-    Node after = subst(before, cache, sub);
-    if (after != before) assertionsToPreprocess->replace(i, after);
+    std::unordered_map<TNode, Node> cache;
+    for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+    {
+      Node before = (*assertionsToPreprocess)[i];
+      Node after = subst(before, cache, sub);
+      if (after != before) assertionsToPreprocess->replace(i, after);
+    }
+  }
+
+  if (relate)
+  {
+    addRelationalLemmas(assertionsToPreprocess, report, doL3, doL4, l3Common);
   }
 
   return PreprocessingPassResult::NO_CONFLICT;
+}
+
+// ---------------------------------------------------------------------------
+// Relational lemmas for the powers multiply-only could not merge.
+//
+// multiply-only folds two same-base powers only when their exponent gap is a
+// CONSTANT: b^(S+a) becomes b^|a-p| * b^(S+p).  When the gap is symbolic --
+// b^x and b^y with y-x not a numeral -- it can do nothing, and the arithmetic
+// solver then treats the two powers as unrelated variables even when the
+// assertions plainly order the exponents.  This adds that link back, for an
+// arbitrary base rather than only base 2:
+//
+//   L3  b^y = b^x * b^(y-x)      when x <= y   (gives divisibility b^x | b^y)
+//   L4  b^y >= b * b^x           when x <  y   and b >= 2
+//
+// L3 is also accompanied by b^(y-x) >= 1 (and >= b under L4's conditions),
+// since it introduces that term.
+//
+// WHEN a lemma is emitted -- every condition must be ENTAILED by the
+// assertions (via IntOrderFacts), so each lemma is implied by the input and
+// satisfiability cannot change:
+//   * both powers occur in the assertions and share a syntactically equal base;
+//   * the base is an integer >= 1 (L3) or >= 2 (L4): checked directly for a
+//     numeral, otherwise entailed;
+//   * both exponents are entailed non-negative (integer power semantics);
+//   * x <= y (L3) / x < y (L4) is entailed;
+//   * the gap y-x is NOT a constant -- those pairs multiply-only already
+//     merged exactly, and re-relating them only duplicates terms;
+//   * neither power sits under a quantifier.
+// Lemmas are rewritten, dropped if constant-true, and deduplicated.  The pair
+// loop is capped to keep it quadratic in a small number of instances.
+// ---------------------------------------------------------------------------
+void ExpAnalyzer::addRelationalLemmas(AssertionPipeline* assertionsToPreprocess,
+                                      bool report,
+                                      bool doL3,
+                                      bool doL4,
+                                      bool l3Common)
+{
+  NodeManager* nm = nodeManager();
+
+  std::vector<Node> cur;
+  cur.reserve(assertionsToPreprocess->size());
+  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+  {
+    cur.push_back((*assertionsToPreprocess)[i]);
+  }
+
+  // Collect the surviving powers, skipping quantifier bodies.
+  std::vector<Node> powers;
+  std::unordered_set<Node> pseen;
+  std::function<void(TNode)> collect = [&](TNode n) {
+    if (!pseen.insert(n).second || n.isClosure()) return;
+    if (n.getKind() == Kind::EXP) powers.push_back(n);
+    for (TNode c : n) collect(c);
+  };
+  for (const Node& a : cur) collect(a);
+
+  const size_t kMaxInstances = 48;
+  if (powers.size() < 2 || powers.size() > kMaxInstances)
+  {
+    return;
+  }
+
+  IntOrderFacts facts(d_preprocContext->getEnv());
+  facts.harvest(cur);
+
+  const Rational one(1);
+  const Rational two(2);
+  Node onen = nm->mkConstInt(one);
+
+  std::vector<Node> lemmas;
+  std::unordered_set<Node> emitted;
+  auto add = [&](Node lem) {
+    Node r = rewrite(lem);
+    if (r.isConst()) return;  // already trivially true
+    if (!emitted.insert(r).second) return;
+    lemmas.push_back(r);
+  };
+
+  // Is the base a usable integer >= bound?
+  auto baseAtLeast = [&](TNode b, const Rational& bound) {
+    if (!b.getType().isInteger()) return false;
+    if (b.isConst())
+    {
+      const Rational& v = b.getConst<Rational>();
+      return v.isIntegral() && v >= bound;
+    }
+    return facts.geqConst(b, bound);
+  };
+
+  // Occurrence counts, so the l3-common mode can pivot on the most frequent
+  // lower power instead of relating every ordered pair.
+  std::map<Node, uint64_t> occ;
+  {
+    std::vector<Node> order2;
+    for (const Node& a : cur) collectExpCounts(a, occ, order2);
+  }
+
+  // Does (px, py) qualify for a relational lemma?  All conditions must be
+  // entailed by the assertions, so any lemma emitted is implied by the input.
+  auto qualifies = [&](const Node& px, const Node& py, Node& gapOut) {
+    if (px == py || px[0] != py[0]) return false;
+    if (!facts.nonNeg(px[1]) || !facts.nonNeg(py[1])) return false;
+    if (!facts.leq(px[1], py[1])) return false;
+    Node gap = rewrite(nm->mkNode(Kind::SUB, py[1], px[1]));
+    if (gap.isConst()) return false;  // multiply-only already folds these
+    if (!baseAtLeast(px[0], one)) return false;
+    gapOut = gap;
+    return true;
+  };
+
+  auto emitL3 = [&](const Node& px, const Node& py, const Node& gap) {
+    Node pgap = nm->mkNode(Kind::EXP, px[0], gap);
+    add(nm->mkNode(Kind::EQUAL, py, nm->mkNode(Kind::MULT, px, pgap)));
+    add(nm->mkNode(Kind::GEQ, pgap, onen));
+  };
+
+  // L4: strict monotonicity, needs a strictly ordered exponent pair and a
+  // genuinely growing base.  Both extra conditions are checked here, so the
+  // caller can offer any qualifying pair and the lemma is simply skipped when
+  // they do not hold.
+  auto emitL4 = [&](const Node& px, const Node& py, const Node& gap) {
+    if (!facts.lt(px[1], py[1]) || !baseAtLeast(px[0], two)) return;
+    Node pgap = nm->mkNode(Kind::EXP, px[0], gap);
+    add(nm->mkNode(Kind::GEQ, py, nm->mkNode(Kind::MULT, px[0], px)));
+    add(nm->mkNode(Kind::GEQ, pgap, px[0]));
+  };
+
+  if (l3Common)
+  {
+    // One lemma per UPPER power: relate it to the single most frequently
+    // occurring lower power, rather than to every lower power.  This caps the
+    // number of introduced b^(y-x) terms at one per upper power instead of one
+    // per ordered pair.  Ties break on the smaller exponent, then on node id,
+    // so the choice is deterministic.
+    for (const Node& py : powers)
+    {
+      const Node* best = nullptr;
+      Node bestGap;
+      uint64_t bestCount = 0;
+      for (const Node& px : powers)
+      {
+        Node gap;
+        if (!qualifies(px, py, gap)) continue;
+        uint64_t c = occ.count(px) ? occ[px] : 0;
+        bool better;
+        if (best == nullptr)
+        {
+          better = true;
+        }
+        else if (c != bestCount)
+        {
+          better = c > bestCount;
+        }
+        else if (facts.leq(px[1], (*best)[1]) != facts.leq((*best)[1], px[1]))
+        {
+          better = facts.leq(px[1], (*best)[1]);
+        }
+        else
+        {
+          better = px < *best;
+        }
+        if (better)
+        {
+          best = &px;
+          bestGap = gap;
+          bestCount = c;
+        }
+      }
+      if (best != nullptr)
+      {
+        emitL3(*best, py, bestGap);
+        // l3-common-l4: L4 for the SAME pair L3 just picked, so it reuses the
+        // b^(y-x) term L3 introduced and adds no further power term.
+        if (doL4)
+        {
+          emitL4(*best, py, bestGap);
+        }
+      }
+    }
+  }
+  else
+  {
+    for (const Node& px : powers)
+    {
+      for (const Node& py : powers)
+      {
+        Node gap;
+        if (!qualifies(px, py, gap)) continue;
+        if (doL3)
+        {
+          emitL3(px, py, gap);
+        }
+        if (doL4)
+        {
+          emitL4(px, py, gap);
+        }
+      }
+    }
+  }
+
+  if (report)
+  {
+    std::cout << ";; relational lemmas: " << lemmas.size() << "\n";
+    for (const Node& l : lemmas) std::cout << ";;   " << l << "\n";
+    std::cout << ";; -----------------------------------------------------\n";
+  }
+  for (const Node& l : lemmas)
+  {
+    assertionsToPreprocess->push_back(l);
+  }
 }
 
 }  // namespace passes

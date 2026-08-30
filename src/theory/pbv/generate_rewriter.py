@@ -245,9 +245,53 @@ def arith_to_cpp(expr, var_ctx: dict) -> str:
 # Per-rule code block
 ###############################################################################
 
+# Rule families gated by --pbv-rw-mw=MODE.  A rule whose name starts with one
+# of these prefixes is emitted behind the corresponding bool member on the
+# rewriter; every other rule is unconditional.
+#
+#   pbv-merge-*  mode base   shift-of-shift and nested-extension merge
+#   pbv-c26-*    mode cav26  bitwise identities from the parabit rule set
+#
+# Rules without a family prefix may still be gated individually; see
+# OPTION_GATED_RULES below.
+#
+# Adding a family means adding a prefix here, a member in the header template
+# below, and a mode value in options/smt_options.toml.
+OPTION_GATED_PREFIXES = {
+    "pbv-merge-": "d_rwMerge",
+    "pbv-c26-": "d_rwCav26",
+}
+
+# Individual rules that are opt-in but whose names do not carry a family
+# prefix.  Keep this empty where a prefix will do; it exists for rules that
+# belong to an existing RW_B group by name (and should keep that name) yet
+# must not fire by default.
+#
+#   pbv-mul-two  strength-reduces `x * 2` to `x + x`.  It sits with
+#                pbv-mul-one/pbv-mul-zero, so renaming it into a family would
+#                misfile it, but it is not part of RW_B (SAT 2025 Appendix A):
+#                leaving it unconditional silently changed the default
+#                translation, since dropping the multiplication also drops the
+#                piand and pow2 terms its integer encoding would have built.
+OPTION_GATED_RULES = {
+    "pbv-mul-two": "d_rwMerge",
+}
+
+
+def gated_guard(name: str) -> str | None:
+    """The option member gating this rule, or None if it is unconditional."""
+    if name in OPTION_GATED_RULES:
+        return OPTION_GATED_RULES[name]
+    for prefix, member in OPTION_GATED_PREFIXES.items():
+        if name.startswith(prefix):
+            return member
+    return None
+
+
 def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
     lines: list[str] = []
     lines.append(f"{indent}// Rule: {rule.name}")
+    gate = gated_guard(rule.name)
 
     var_ctx: dict = {}
     structural_guards: list[str] = []
@@ -268,6 +312,8 @@ def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
     all_guards = structural_guards[:]
     if sem:
         all_guards.append(sem)
+    if gate:
+        all_guards.insert(0, gate)
 
     if all_guards:
         guard_expr = "\n" + f"{indent}    && ".join(all_guards)
@@ -307,7 +353,263 @@ def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
 # Source: Appendix A, "Bit-Precise Reasoning with Parametric Bit-Vectors"
 ###############################################################################
 
+BOOL_HELPERS = r"""namespace {
+/** Is this the all-zero constant `(int_to_pbv k 0)`? */
+bool isZeroConst(TNode n)
+{
+  return n.getKind() == Kind::INT_TO_PBV && n.getNumChildren() == 2
+         && n[1].isConst() && n[1].getConst<Rational>().sgn() == 0;
+}
+/** Does this node's top symbol act bitwise, so we can descend through it? */
+bool isBitwise(TNode n)
+{
+  Kind k = n.getKind();
+  return ((k == Kind::PBV_AND || k == Kind::PBV_OR || k == Kind::PBV_XOR)
+          && n.getNumChildren() == 2)
+         || (k == Kind::PBV_NOT && n.getNumChildren() == 1);
+}
+}  // namespace
+
+bool TheoryPbvRewriter::boolLeaves(TNode n,
+                                   std::vector<Node>& leaves,
+                                   uint64_t cap)
+{
+  if (isZeroConst(n))
+  {
+    return true;  // the constant 0 contributes no variable
+  }
+  if (isBitwise(n))
+  {
+    for (size_t i = 0, m = n.getNumChildren(); i < m; ++i)
+    {
+      if (!boolLeaves(n[i], leaves, cap)) return false;
+    }
+    return true;
+  }
+  if (std::find(leaves.begin(), leaves.end(), Node(n)) == leaves.end())
+  {
+    if (leaves.size() >= cap) return false;
+    leaves.emplace_back(n);
+  }
+  return true;
+}
+
+bool TheoryPbvRewriter::boolEval(TNode n,
+                                 const std::vector<Node>& leaves,
+                                 uint64_t asg)
+{
+  if (isZeroConst(n)) return false;
+  Kind k = n.getKind();
+  if (isBitwise(n))
+  {
+    if (k == Kind::PBV_NOT) return !boolEval(n[0], leaves, asg);
+    bool a = boolEval(n[0], leaves, asg);
+    bool b = boolEval(n[1], leaves, asg);
+    if (k == Kind::PBV_AND) return a && b;
+    if (k == Kind::PBV_OR) return a || b;
+    return a != b;  // PBV_XOR
+  }
+  auto it = std::find(leaves.begin(), leaves.end(), Node(n));
+  size_t idx = static_cast<size_t>(it - leaves.begin());
+  return ((asg >> idx) & 1u) != 0;
+}
+
+"""
+
 MANUAL_RULES_BODY = """\
+
+  // ---------------------------------------------------------------------------
+  // Shift merge across a zero extension (--pbv-rw-shift-zext-merge, off by default)
+  //
+  //   (pbvlshr (pzero_extend n (pbvlshr x y)) z)
+  //       -> ite( (pbvadd y' z) >=u z ,  (pbvlshr x' (pbvadd y' z)) ,  0 )
+  //   where x' = (pzero_extend n x), y' = (pzero_extend n y); dually for pbvshl.
+  //
+  // pbv-merge-lshr requires the two shifts to be ADJACENT, so it never matches a
+  // multi-width goal: there the intermediate width sits between them as exactly
+  // this zero extension. And the integer-level nested-division merge cannot help
+  // either, because the int-blaster purifies the divisions into skolems while
+  // translating, before the mod-reduction pass runs.
+  //
+  // Zero extension preserves the value, so the composition is x div 2^(y+z) --
+  // the same identity pbv-merge-lshr proves for adjacent shifts, with the same
+  // overflow guard, since y'+z is computed mod 2^|z| and can wrap.
+  // ---------------------------------------------------------------------------
+  if (d_rwShiftZext
+      && (node.getKind() == Kind::PBV_LSHR || node.getKind() == Kind::PBV_SHL)
+      && node.getNumChildren() == 2
+      && node[0].getKind() == Kind::PBV_ZERO_EXTEND
+      && node[0].getNumChildren() == 2
+      && node[0][1].getKind() == node.getKind()
+      && node[0][1].getNumChildren() == 2)
+  {
+    Kind sk = node.getKind();
+    Node n0 = node[0][0];          // the extension amount
+    Node x = node[0][1][0];
+    Node y = node[0][1][1];
+    Node z = node[1];
+    Node xe = nm->mkNode(Kind::PBV_ZERO_EXTEND, {n0, x});
+    Node ye = nm->mkNode(Kind::PBV_ZERO_EXTEND, {n0, y});
+    Node sum = nm->mkNode(Kind::PBV_ADD, {ye, z});
+    Node noOverflow = nm->mkNode(Kind::PBV_UGE, {sum, z});
+    Node zero = nm->mkNode(Kind::INT_TO_PBV,
+                           {nm->mkNode(Kind::PBV_SIZE, {z}),
+                            nm->mkConstInt(Rational(0))});
+    Node merged = nm->mkNode(sk, {xe, sum});
+    return RewriteResponse(REWRITE_AGAIN_FULL,
+                           nm->mkNode(Kind::ITE, {noOverflow, merged, zero}));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Boolean decision for bitwise equalities (--pbv-rw-bool, off by default)
+  //
+  // pbvand/pbvor/pbvxor/pbvnot act on each bit independently and identically,
+  // so two such terms denote the same value at EVERY width exactly when the
+  // Boolean functions they define over their leaves coincide. Enumerating the
+  // leaf assignments therefore DECIDES this fragment -- which is what parabit
+  // reaches only by saturating an e-graph with bidirectional xor_as_or_and and
+  // and_distrib. A destructive rewriter cannot saturate, so it decides instead.
+  //
+  // A non-bitwise leaf is treated as an independent variable. That is sound for
+  // concluding equality (agreement for every value of the leaf implies
+  // agreement for its actual value) and merely costs completeness. Note the
+  // converse is NOT available: differing tables cannot refute the goal, because
+  // the leaves need not be independent, so this only ever returns true.
+  // ---------------------------------------------------------------------------
+  if (d_rwBool && node.getKind() == Kind::EQUAL && node.getNumChildren() == 2
+      && node[0].getType().isPbv() && node[0] != node[1]
+      && (isBitwise(node[0]) || isBitwise(node[1])))
+  {
+    std::vector<Node> leaves;
+    if (boolLeaves(node[0], leaves, d_boolCap)
+        && boolLeaves(node[1], leaves, d_boolCap) && !leaves.empty()
+        && leaves.size() <= d_boolCap)
+    {
+      bool same = true;
+      uint64_t rows = uint64_t(1) << leaves.size();
+      for (uint64_t a = 0; a < rows; ++a)
+      {
+        if (boolEval(node[0], leaves, a) != boolEval(node[1], leaves, a))
+        {
+          same = false;
+          break;
+        }
+      }
+      if (same)
+      {
+        return RewriteResponse(REWRITE_DONE, nm->mkConst(true));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // De Morgan / negation normal form (--pbv-rw-nnf, off by default)
+  //
+  //   (pbvnot (pbvand x y))  ->  (pbvor  (pbvnot x) (pbvnot y))
+  //   (pbvnot (pbvor  x y))  ->  (pbvand (pbvnot x) (pbvnot y))
+  //
+  // Terminating: each application moves a negation one level toward the leaves,
+  // and pbv-not-idemp collapses the doubled ones, so the fixpoint is NNF.
+  //
+  // The term gets bigger, which is the whole point of it being opt-in -- what it
+  // buys is a canonical DIRECTION. Goals in this family are written as
+  // `(and (xor a ~0) (xor b ~0)) = (xor (or a b) ~0)`; --pbv-rw-mw=cav26 turns
+  // `xor all-ones` into pbvnot, and then one side is `(and (not a) (not b))` and
+  // the other `(not (or a b))`. Without De Morgan those are distinct terms and
+  // the equality goes to the arithmetic solver as a piand query; with it, both
+  // normalize to the same term and the goal closes in the rewriter.
+  // ---------------------------------------------------------------------------
+  if (d_rwNnf && node.getKind() == Kind::PBV_NOT && node.getNumChildren() == 1
+      && (node[0].getKind() == Kind::PBV_AND
+          || node[0].getKind() == Kind::PBV_OR)
+      && node[0].getNumChildren() == 2)
+  {
+    Kind inner = node[0].getKind();
+    Kind flipped = (inner == Kind::PBV_AND) ? Kind::PBV_OR : Kind::PBV_AND;
+    Node nx = nm->mkNode(Kind::PBV_NOT, {node[0][0]});
+    Node ny = nm->mkNode(Kind::PBV_NOT, {node[0][1]});
+    return RewriteResponse(REWRITE_AGAIN_FULL,
+                           nm->mkNode(flipped, {nx, ny}));
+  }
+
+  // ---------------------------------------------------------------------------
+  // AC normalization for the associative-commutative operators
+  // (--pbv-rw-ac, off by default): pbvand/pbvor/pbvxor and pbvadd/pbvmul.
+  //
+  // pbvand/pbvor/pbvxor are associative and commutative, but nothing in RW_B
+  // canonicalizes the SHAPE of a nested chain. So `(x & y) & z` and
+  // `x & (y & z)` stay distinct terms, and an equality between them survives
+  // preprocessing and is handed to the arithmetic solver as a piand query --
+  // which blows up once the leaves are symbolic-width extracts. parabit closes
+  // exactly these by saturating with and.assoc / and.commute.
+  //
+  // Here: flatten the same-kind chain to its leaves, order them canonically,
+  // drop duplicates for and/or (idempotent), and rebuild. pbvxor is ordered but
+  // NOT deduplicated -- x xor x is 0, not x, and the binary case already has
+  // its own rule.
+  //
+  // The chain is rebuilt RIGHT-ASSOCIATED and BINARY: PbvTypeRule asserts a
+  // bitwise node has exactly two children, so an n-ary node must not be built.
+  //
+  // Width note: the encoding takes kappa(parent) = kappa(child 0), so moving a
+  // different leaf into position 0 is only sound because the admissibility
+  // constraints equate the operand widths, and the translation always asserts
+  // them.
+  if (d_rwAc
+      && (node.getKind() == Kind::PBV_AND || node.getKind() == Kind::PBV_OR
+          || node.getKind() == Kind::PBV_XOR || node.getKind() == Kind::PBV_ADD
+          || node.getKind() == Kind::PBV_MULT))
+  {
+    Kind bk = node.getKind();
+    // Flatten the same-kind chain into its leaves.
+    std::vector<Node> leaves;
+    std::vector<TNode> work{node};
+    while (!work.empty())
+    {
+      TNode cur = work.back();
+      work.pop_back();
+      if (cur.getKind() == bk)
+      {
+        for (size_t ci = cur.getNumChildren(); ci-- > 0;)
+        {
+          work.push_back(cur[ci]);
+        }
+      }
+      else
+      {
+        leaves.emplace_back(cur);
+      }
+    }
+    if (leaves.size() >= 2)
+    {
+      std::vector<Node> norm = leaves;
+      std::sort(norm.begin(), norm.end());
+      // Idempotence holds for and/or only: x xor x is 0, x + x is 2x, and
+      // x * x is x^2, so duplicates must survive everywhere else.
+      if (bk == Kind::PBV_AND || bk == Kind::PBV_OR)
+      {
+        norm.erase(std::unique(norm.begin(), norm.end()), norm.end());
+      }
+      Node rebuilt;
+      if (norm.size() == 1)
+      {
+        // Only reachable for and/or, where dedup collapsed every leaf to one.
+        rebuilt = norm[0];
+      }
+      else
+      {
+        rebuilt = norm.back();
+        for (size_t li = norm.size() - 1; li-- > 0;)
+        {
+          rebuilt = nm->mkNode(bk, {norm[li], rebuilt});
+        }
+      }
+      if (rebuilt != node)
+      {
+        return RewriteResponse(REWRITE_AGAIN_FULL, rebuilt);
+      }
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Raw C++ rules (width-dependent RHS; not expressible in RARE DSL)
@@ -418,6 +720,7 @@ HEADER_CONTENT = """\
 #ifndef CVC5__THEORY__PBV__THEORY_PBV_REWRITER_H
 #define CVC5__THEORY__PBV__THEORY_PBV_REWRITER_H
 
+#include "options/smt_options.h"
 #include "theory/theory_rewriter.h"
 
 namespace cvc5::internal {
@@ -426,7 +729,35 @@ namespace pbv {
 
 class TheoryPbvRewriter : public TheoryRewriter {
  public:
-  TheoryPbvRewriter(NodeManager* nm) : TheoryRewriter(nm) {}
+  /**
+   * @param rwMw value of --pbv-rw-mw=MODE, selecting which opt-in rule
+   * families to apply:
+   *   none   neither (default)
+   *   base   the `pbv-merge-*` rules: shift-of-shift merge, nested
+   *          extension merge
+   *   cav26  the `pbv-c26-*` rules: bitwise identities adapted from the
+   *          parabit rule set
+   *   all    both
+   */
+  TheoryPbvRewriter(NodeManager* nm,
+                    options::PbvRwMwMode rwMw = options::PbvRwMwMode::NONE,
+                    bool rwAc = false,
+                    bool rwNnf = false,
+                    bool rwBool = false,
+                    uint64_t boolCap = 12,
+                    bool rwShiftZext = false)
+      : TheoryRewriter(nm),
+        d_rwMerge(rwMw == options::PbvRwMwMode::BASE
+                  || rwMw == options::PbvRwMwMode::ALL),
+        d_rwCav26(rwMw == options::PbvRwMwMode::CAV26
+                  || rwMw == options::PbvRwMwMode::ALL),
+        d_rwAc(rwAc),
+        d_rwNnf(rwNnf),
+        d_rwBool(rwBool),
+        d_boolCap(boolCap),
+        d_rwShiftZext(rwShiftZext)
+  {
+  }
 
   /**
    * Post-rewrite: apply the full RW_B rule set (Appendix A).
@@ -441,6 +772,27 @@ class TheoryPbvRewriter : public TheoryRewriter {
   RewriteResponse preRewrite(TNode node) override {
     return RewriteResponse(REWRITE_DONE, node);
   }
+
+ private:
+  /** --pbv-rw-mw=base|all: enable the `pbv-merge-*` rules. */
+  bool d_rwMerge;
+  /** --pbv-rw-mw=cav26|all: enable the `pbv-c26-*` rules. */
+  bool d_rwCav26;
+  /** --pbv-rw-ac: AC-normalize pbvand/pbvor/pbvxor. */
+  bool d_rwAc;
+  /** --pbv-rw-nnf: push pbvnot inward through pbvand/pbvor (De Morgan). */
+  bool d_rwNnf;
+  /** --pbv-rw-bool: decide bitwise equalities by Boolean evaluation. */
+  bool d_rwBool;
+  /** --pbv-rw-bool-cap: give up past this many distinct leaves. */
+  uint64_t d_boolCap;
+  /** --pbv-rw-shift-zext-merge: merge shifts across a zero extension. */
+  bool d_rwShiftZext;
+
+  /** Gather the distinct non-bitwise leaves of a bitwise term. */
+  static bool boolLeaves(TNode n, std::vector<Node>& leaves, uint64_t cap);
+  /** Evaluate a bitwise term under an assignment (bit i of `asg` per leaf). */
+  static bool boolEval(TNode n, const std::vector<Node>& leaves, uint64_t asg);
 };
 
 }  // namespace pbv
@@ -514,6 +866,9 @@ def generate(output_dir: Path = None):
         "\n"
         "#include \"theory/pbv/theory_pbv_rewriter.h\"\n"
         "\n"
+        "#include <algorithm>\n"
+        "#include <vector>\n"
+        "\n"
         "#include \"expr/node.h\"\n"
         "#include \"expr/node_manager.h\"\n"
         "#include \"theory/rewriter.h\"\n"
@@ -523,6 +878,7 @@ def generate(output_dir: Path = None):
         "namespace theory {\n"
         "namespace pbv {\n"
         "\n"
+        f"{BOOL_HELPERS}"
         "RewriteResponse TheoryPbvRewriter::postRewrite(TNode node)\n"
         "{\n"
         "  NodeManager* nm = d_nm;\n"

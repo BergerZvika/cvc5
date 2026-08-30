@@ -123,6 +123,15 @@ class PreprocessingPassContext : protected EnvObj
   /** Add top level substitutions for a substitution map */
   void addSubstitutions(theory::TrustSubstitutionMap& tm);
 
+  /**
+   * --pbv-type-check=*-after: the width-only query built during the PBV
+   * translation, kept so the solver can discharge it once the main solve has
+   * answered unsat and attribute the unsatisfiability to its source.
+   */
+  void setPbvTypeCheckQuery(Node q) { d_pbvTypeCheckQuery = q; }
+  /** Null when no such query was built. */
+  Node getPbvTypeCheckQuery() const { return d_pbvTypeCheckQuery; }
+
  private:
   /** Helper method for printing substitutions */
   void printSubstitution(const Node& lhs, const Node& rhs) const;
@@ -144,9 +153,13 @@ class PreprocessingPassContext : protected EnvObj
    */
   context::CDHashSet<Node> d_symsInAssertions;
 
+  /** See setPbvTypeCheckQuery. */
+  Node d_pbvTypeCheckQuery;
+
 };  // class PreprocessingPassContext
 
 }  // namespace preprocessing
 }  // namespace cvc5::internal
 
 #endif /* CVC5__PREPROCESSING__PREPROCESSING_PASS_CONTEXT_H */
+

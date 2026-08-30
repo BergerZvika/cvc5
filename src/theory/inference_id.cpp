@@ -135,8 +135,16 @@ const char* toString(InferenceId i)
       return "ARITH_NL_EXP_BOUND_CASE_REFINE";
     case InferenceId::ARITH_NL_EXP_MONOTONE_REFINE:
       return "ARITH_NL_EXP_MONOTONE_REFINE";
+    case InferenceId::ARITH_NL_EXP_FUSE_REFINE:
+      return "ARITH_NL_EXP_FUSE_REFINE";
     case InferenceId::ARITH_NL_EXP_INDUCTION_REFINE:
       return "ARITH_NL_EXP_INDUCTION_REFINE";
+    case InferenceId::ARITH_NL_EXP_SYMMETRY_REFINE:
+      return "ARITH_NL_EXP_SYMMETRY_REFINE";
+    case InferenceId::ARITH_NL_EXP_COMPOSE_REFINE:
+      return "ARITH_NL_EXP_COMPOSE_REFINE";
+    case InferenceId::ARITH_NL_EXP_PHASE_BOUND:
+      return "ARITH_NL_EXP_PHASE_BOUND";
     case InferenceId::ARITH_NL_COVERING_CONFLICT: return "ARITH_NL_COVERING_CONFLICT";
     case InferenceId::ARITH_NL_COVERING_EXCLUDED_INTERVAL:
       return "ARITH_NL_COVERING_EXCLUDED_INTERVAL";

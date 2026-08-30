@@ -57,6 +57,7 @@
 #include "smt/model.h"
 #include "smt/model_blocker.h"
 #include "smt/model_core_builder.h"
+#include "preprocessing/preprocessing_pass_context.h"
 #include "smt/preprocessor.h"
 #include "smt/proof_manager.h"
 #include "smt/quant_elim_solver.h"
@@ -819,6 +820,77 @@ Result SolverEngine::checkSatInternal(const std::vector<Node>& assumptions)
                << endl;
   // notify our state of the check-sat result
   d_state->notifyCheckSatResult(r);
+
+  // --pbv-type-check=*-after: an unsat verdict on a parametric bit-vector
+  // formula can have two very different sources -- the widths cannot be made
+  // consistent at all, or they can but the bit-vector constraints still fail.
+  // Discharging the width-only query now attributes the answer to one of them.
+  // Running it here rather than up front is what keeps the deep checker, whose
+  // query need not be linear, off the path of formulas that were going to be
+  // answered anyway.
+  if ((d_env->getOptions().smt.pbvTypeCheck
+           == options::PbvTypeCheckMode::SHALLOW_AFTER
+       || d_env->getOptions().smt.pbvTypeCheck
+              == options::PbvTypeCheckMode::DEEP_AFTER)
+      && r.getStatus() == Result::UNSAT)
+  {
+    preprocessing::PreprocessingPassContext* ppc =
+        d_smtSolver->getPreprocessor()->getPassContext();
+    Node q = ppc == nullptr ? Node::null() : ppc->getPbvTypeCheckQuery();
+    if (!q.isNull())
+    {
+      if (d_env->isOutputOn(OutputTag::PBV_TYPE_CHECK))
+      {
+        d_env->output(OutputTag::PBV_TYPE_CHECK)
+            << "(pbv-type-check :checker "
+            << (d_env->getOptions().smt.pbvTypeCheck
+                        == options::PbvTypeCheckMode::DEEP_AFTER
+                    ? "deep"
+                    : "shallow")
+            << " :when after" << std::endl
+            << "  :query " << q << ")" << std::endl;
+      }
+      Options subOpts;
+      subOpts.copyValues(d_env->getOptions());
+      subOpts.write_smt().pbvTypeCheck = options::PbvTypeCheckMode::NONE;
+      theory::SubsolverSetupInfo ssi(*d_env.get(), subOpts);
+      Result tr = theory::checkWithSubsolver(q, ssi);
+      if (d_env->isOutputOn(OutputTag::PBV_TYPE_CHECK))
+      {
+        d_env->output(OutputTag::PBV_TYPE_CHECK)
+            << "(pbv-type-check :verdict " << tr << ")" << std::endl;
+      }
+      if (tr.getStatus() == Result::UNSAT)
+      {
+        // The unsat verdict is attributable to the widths alone, i.e. the
+        // formula was never well-sorted. Raise so this cannot be read as an
+        // ordinary bit-vector unsat.
+        std::stringstream ss;
+        ss << "PBV type checking (--pbv-type-check="
+           << (d_env->getOptions().smt.pbvTypeCheck
+                       == options::PbvTypeCheckMode::DEEP_AFTER
+                   ? "deep-after"
+                   : "shallow-after")
+           << ") found this formula ill-typed: its unsatisfiability is "
+              "explained by the width and typing constraints alone, with no "
+              "appeal to the bit-vector semantics.";
+        throw LogicException(ss.str());
+      }
+      else if (tr.getStatus() == Result::SAT)
+      {
+        d_env->verbose(1) << "(pbv-type-check well-typed \"the widths are "
+                      "satisfiable; unsat comes from the bit-vector "
+                      "constraints\")"
+                   << std::endl;
+      }
+      else
+      {
+        d_env->verbose(1) << "(pbv-type-check unknown \"the width query could not be "
+                      "decided\")"
+                   << std::endl;
+      }
+    }
+  }
 
   // Check that SAT results generate a model correctly.
   if (d_env->getOptions().smt.checkModels)

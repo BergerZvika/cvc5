@@ -92,6 +92,12 @@
   (pbvmul x (int_to_pbv k 0))
   (int_to_pbv k 0))
 
+; bv-mul-two: (pbvmul x (int_to_pbv k 2)) => (pbvadd x x)
+(define-rule pbv-mul-two
+  ((x ?) (k Int))
+  (pbvmul x (int_to_pbv k 2))
+  (pbvadd x x))
+
 ; ---------------------------------------------------------------------------
 ; Extend elimination
 ; ---------------------------------------------------------------------------
@@ -365,3 +371,170 @@
   ((x ?) (y ?) (i Int) (j Int))
   (pbvand (pextract x j i) (pextract y j i))
   (pextract (pbvand x y) j i))
+
+; ---------------------------------------------------------------------------
+; NOTE: the extract-over-extend rules (A1/A2/B1/B2) are NOT here. Their side
+; condition w(x) = i+1 cannot be decided syntactically, so they live in the
+; pbv-mw preprocessing pass (--pbv-preprocess-mw). See preprocessing/passes/pbv_mw.h.
+;
+; Retired header   (--pbv-rw-mw, off by default)
+;
+; The low w bits of an extension are exactly its source, so a low extract can
+; be pushed through the bitwise/arithmetic operators and annihilated at any
+; extension whose source has width w.  This matters because psign_extend's
+; integer encoding is an msb ITE plus two extra pow2 terms and a product; once
+; the int-blaster has built that, the structure cannot be recovered.  Applying
+; these rules BEFORE translation deletes the extension outright.
+;
+; pbvand is deliberately absent: pbv-reverse-extract-and rewrites in the
+; opposite direction and the pair would not terminate.
+; ---------------------------------------------------------------------------
+
+; ---------------------------------------------------------------------------
+; Shift-of-shift merge   (--pbv-rw-mw, off by default)
+;
+; Two nested shifts by symbolic amounts translate to a NESTED exponential:
+; pbvlshr becomes `x div 2^y`, so (x >> y) >> z becomes 2^(...2^...), which
+; the arithmetic solver cannot reason about. Merging them leaves a single
+; exponential.
+;
+; SOUNDNESS: the naive (x >> y) >> z = x >> (y+z) is WRONG in BV semantics,
+; because y+z is computed modulo 2^k and can wrap. At k=8, y=z=128 gives
+; y+z = 0, so x >> 0 = x, while (x>>128)>>128 = 0.
+;
+; The guard `pbvuge (pbvadd y z) y` is exactly "y+z did not overflow"
+; (unsigned addition wraps iff the sum drops below an operand). When it
+; holds, y+z is the true sum and `x >> (y+z)` already yields 0 for sums >= k.
+; When it fails, y+z >= 2^k, so at least one of y,z is >= 2^(k-1) >= k
+; (for k >= 1) and the true result is 0. Hence the ite is exact.
+;
+; pbvashr is deliberately absent: it fills with the sign bit rather than 0,
+; so the overflow branch is not the zero constant and the merge saturates at
+; k-1 instead of wrapping. That needs a different rule.
+; ---------------------------------------------------------------------------
+
+(define-rule pbv-merge-lshr
+  ((x ?) (y ?) (z ?))
+  (pbvlshr (pbvlshr x y) z)
+  (ite (pbvuge (pbvadd y z) y)
+       (pbvlshr x (pbvadd y z))
+       (int_to_pbv (pbvsize x) 0)))
+
+(define-rule pbv-merge-shl
+  ((x ?) (y ?) (z ?))
+  (pbvshl (pbvshl x y) z)
+  (ite (pbvuge (pbvadd y z) y)
+       (pbvshl x (pbvadd y z))
+       (int_to_pbv (pbvsize x) 0)))
+
+; ---------------------------------------------------------------------------
+; Nested extension merge   (--pbv-rw-mw, off by default)
+;
+; Two stacked extensions collapse into one, saving a translation step. Neither
+; pattern occurs in cav26 today, but the pbv-mw extract push-down can expose
+; them: pushing an extract through an operator can leave an extension sitting
+; directly on another one.
+;
+; zext(n, zext(m, x)) = zext(n+m, x)   -- both pad with zeros, so stacking is
+;                                         the same as one wider pad.
+;
+; sext(n, sext(m, x)) = sext(n+m, x)   -- the inner sext replicates x's sign
+;                                         bit, and the outer replicates that
+;                                         same bit, so all n+m added bits equal
+;                                         the original sign bit.
+;
+; The MIXED forms are deliberately absent:
+;   zext(n, sext(m, x)) is NOT sext(n+m, x) -- the outer pad is zeros while
+;   sext would replicate the sign bit; they differ whenever x is negative.
+;   sext(n, zext(m, x)) is NOT zext(n+m, x) unless m > 0 forces the sign bit
+;   of the inner result to 0, which is a side condition on m, not a rewrite.
+; ---------------------------------------------------------------------------
+
+(define-rule pbv-merge-zext
+  ((x ?) (n Int) (m Int))
+  (pzero_extend n (pzero_extend m x))
+  (pzero_extend (+ n m) x))
+
+(define-rule pbv-merge-sext
+  ((x ?) (n Int) (m Int))
+  (psign_extend n (psign_extend m x))
+  (psign_extend (+ n m) x))
+
+; ---------------------------------------------------------------------------
+; Bitwise identities from the parabit rule set   (--pbv-rw-mw=cav26)
+;
+; Source: rewrite_rules.rs of the CAV 2026 parabit artifact; the numbering in
+; the comments is the index in that file's rule list.
+;
+; These fill in the pbvand side of RW_B, which had only the zero case
+; (pbv-and-zero) and the extract merge (pbv-reverse-extract-and), while pbvor
+; and pbvxor already carried their idempotence and negation rules.  In parabit
+; the AND and OR cases are symmetric; here they were not.
+;
+; All are unconditional and none introduces a new bitwise operator, so design
+; principle (i) of Section 4.1 holds.
+;
+; ONE rule is deliberately ABSENT:
+;
+;   parabit 70  (xor x 1) -> (pconcat (pextract x (k-1) 1) (pbvnot (pextract x 0 0)))
+;
+; The concat form is malformed at k = 1: `(pextract x 0 1)` has its high index
+; below its low index, and there is no k >= 2 side condition available to a
+; syntactic rewriter.  (At k = 1 the correct result is simply (pbvnot x).)
+; parabit does not hit this because its preconditions are discharged against
+; an e-graph that already knows the concrete widths.  If wanted, this belongs
+; in the pbv-mw preprocessing pass, where width side conditions can be
+; discharged against the asserted `(= (pbvsize x) V)` links.
+;
+; Note on pbv-c26-and-one below: its RHS width is (k-1) + 1 = k, which matches
+; the LHS only when k is the width of x.  In T_PBV that is an admissibility
+; condition rather than a typing one -- the single PBitVec sort does not force
+; the operands of pbvand to share a width -- but the same is already true of
+; accepted RW_B rules such as pbv-shl-by-const-2 and pbv-ult-one, which build
+; their RHS at the width of the int_to_pbv operand.  It needs k >= 1, which
+; Adm(phi) supplies for every width.
+; ---------------------------------------------------------------------------
+
+; parabit 50 -- and_allones: (and (bw p a) (bw p -1)) => (bw p a)
+(define-rule pbv-c26-and-allones
+  ((x ?) (k Int))
+  (pbvand x (pbvnot (int_to_pbv k 0)))
+  x)
+
+; parabit 54 -- and_self: (and a a) => a
+;   The pbvor counterpart is pbv-bitwise-idemp-2; this one was missing.
+(define-rule pbv-c26-and-self
+  ((x ?))
+  (pbvand x x)
+  x)
+
+; parabit 56 -- and_not_self: (and (bw p a) (bw p (not (bw p a)))) => 0
+;   The pbvor counterpart is pbv-bitwise-not-or (raw C++); this one was missing.
+(define-rule pbv-c26-and-not-self
+  ((x ?))
+  (pbvand x (pbvnot x))
+  (int_to_pbv (pbvsize x) 0))
+
+; parabit 51 -- and_one: (and (bw p a) 1) => (bw 1 a)
+;   Keep only bit 0 and zero-fill the rest.  See the width note in the section
+;   header above.
+(define-rule pbv-c26-and-one
+  ((x ?) (k Int))
+  (pbvand x (int_to_pbv k 1))
+  (pzero_extend (- k 1) (pextract x 0 0)))
+
+; parabit 53 -- xor_allones: (bw p (xor (bw p a) (bw p -1))) => (bw p (not (bw p a)))
+(define-rule pbv-c26-xor-allones
+  ((x ?) (k Int))
+  (pbvxor x (pbvnot (int_to_pbv k 0)))
+  (pbvnot x))
+
+; parabit 79 -- neg_not: (- (bw p a)) <=> (+ (not (bw p a)) 1)
+;   Oriented RIGHT-TO-LEFT only.  parabit has it bidirectional because egg
+;   saturates an e-graph; applied left-to-right in a destructive rewriter it
+;   would replace a single pbvneg with two nodes, and the integer translation
+;   of pbvnot + pbvadd is strictly larger than that of pbvneg.
+(define-rule pbv-c26-not-plus-one
+  ((x ?) (k Int))
+  (pbvadd (pbvnot x) (int_to_pbv k 1))
+  (pbvneg x))

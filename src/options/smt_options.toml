@@ -436,6 +436,160 @@ name   = "SMT Layer"
   help       = "in the PBV-to-int preprocessing translation, use the partial INTS_MODULUS instead of INTS_MODULUS_TOTAL when reducing mod 2^k (divisors are always positive, so this only changes how the arithmetic solver handles the mod term). Disabled by default."
 
 [[option]]
+  name       = "pbvToIntReduceMods"
+  category   = "expert"
+  long       = "pbv-to-int-reduce-mods=MODE"
+  type       = "PbvReduceModsMode"
+  default    = "NONE"
+  help       = "after the PBV-to-int translation to NIA, run a post-pass that removes redundant `mod 2^k` operations (see --pbv-to-int-reduce-mods=help). Uses the width-ordering facts already present in the translated assertions (ADM/RANGE constraints) to discharge the side condition of each rewrite. Each mod removed also removes a purification skolem and a nonlinear q*2^k monomial. The mode selects WHICH family of rewrites to apply, so that the two families can be benchmarked against each other. Disabled by default."
+  help_mode  = "Mod-reduction rule families. 'base' is the original set: nested-mod absorption in either direction, distribution of an enclosing mod through +/-/*/unary- and through ITE branches, and the extract shape `M(M(x,m) div 2^j, w)` with `j+w <= m`. Every base rule strips an inner mod that some surviving outer mod already subsumes, so the range information the arithmetic solver relies on is never lost. 'cav26' is the family adapted from the parabit rewrite set (CAV 2026 artifact): it computes a symbolic width bound for a term -- a width expression `w` with `0 <= t < 2^w` -- from the term's structure, and deletes an enclosing `mod 2^k` outright whenever `w <= k` is entailed. That covers a product of a p-bit and a q-bit value under a (p+q)-bit mod, a sum of two narrower values, multiplication by a single bit, a division whose numerator is already bounded, a piand under a mod at least as wide, and a left shift by a bounded amount; it also merges nested pow2 divisions. Unlike the base family these rules can delete the last mod carrying a term's range, so they trade solver information for a smaller formula and should be measured, not assumed. 'all' runs both."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not run the post-pass (default)."
+[[option.mode.BASE]]
+  name = "base"
+  help = "Original rule set only: cases 1-5, each of which leaves a surviving mod that still carries the range."
+[[option.mode.CAV26]]
+  name = "cav26"
+  help = "Width-bound rule family adapted from the parabit (CAV 2026) rewrite set only: delete a mod whose argument is provably below it, merge nested pow2 divisions, and strip subsumed mods from piand arguments."
+[[option.mode.ALL]]
+  name = "all"
+  help = "Run both families."
+
+[[option]]
+  name       = "pbvTypeCheck"
+  category   = "expert"
+  long       = "pbv-type-check=MODE"
+  type       = "PbvTypeCheckMode"
+  default    = "NONE"
+  help       = "type checking for parametric bit-vectors (see --pbv-type-check=help). The single sort PBV admits terms that would be ill-sorted in BV, so a PBV formula can be unsatisfiable purely because no assignment to its symbolic widths makes it well-sorted -- for instance 'x + y = z /\\ |x| = |y| + 1', where addition forces |x| = |y|. The checker makes that distinction visible: whether an unsat answer comes from the formula not being well-sorted, or from the bit-vector constraints themselves. The mode chooses WHAT checker to run (shallow or deep) and WHEN to run it (before or after solving)."
+  help_mode  = "PBV type checking modes. 'shallow' is the admissibility constraint Adm(phi): the local width side conditions of each sub-term (equal operand widths, positive widths), a conjunction of linear integer constraints that is discharged quickly and decidably. 'deep' starts from that same constraint and adds the width constraints the formula itself imposes, rather than only those dictated by the syntax of its sub-terms; it is more precise but the resulting width query need not be linear, so reasoning about it in full generality may not terminate. 'before' discharges the width-only query as its own obligation ahead of the main solve, in the manner of the type correctness conditions of CVC Lite: an ill-typed formula is rejected without paying for any bit-vector reasoning, though with the deep checker this risks diverging on a formula that is in fact unsatisfiable. 'after' runs the checker only once the main solve has answered unsat, turning it into a diagnostic that attributes the unsatisfiability to its source."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Do not type check (default)."
+[[option.mode.SHALLOW_BEFORE]]
+  name = "shallow-before"
+  help = "Discharge the admissibility constraint Adm(phi) as a separate query before solving; report the formula ill-typed if it is unsatisfiable."
+[[option.mode.SHALLOW_AFTER]]
+  name = "shallow-after"
+  help = "After an unsat verdict, check Adm(phi) to attribute the unsatisfiability to the width/typing constraints or to the bit-vector semantics."
+[[option.mode.DEEP_BEFORE]]
+  name = "deep-before"
+  help = "As shallow-before, but the query also carries the width constraints the formula itself imposes. May not terminate."
+[[option.mode.DEEP_AFTER]]
+  name = "deep-after"
+  help = "As shallow-after, but the query also carries the width constraints the formula itself imposes. May not terminate."
+
+[[option]]
+  name       = "expReduceModPow"
+  category   = "expert"
+  long       = "exp-reduce-mod-pow"
+  type       = "bool"
+  default    = "false"
+  help       = "after translation, run a post-pass that reduces a modulus whose divisor is a power to a case split on the two exponents, for any base s entailed to be at least 2: '(mod (exp s a) (exp s b))' becomes 'ite(a >= b, 0, (exp s a))', and '(mod (* x (exp s a)) (exp s b))' becomes 'ite(a >= b, 0, (* (mod x (exp s (- b a))) (exp s a)))'. Both are valid for s >= 2 and a, b >= 0 (divisibility of powers, and (x*m) mod (m*n) = m*(x mod n)); the side conditions are discharged from constants, from the term structure, or from the order facts in the assertions, and the term is left alone where they cannot be. This removes the q*s^b monomial that expanding the modulus would otherwise hand to the nonlinear extension. Applies to any logic, not only the PBV translation. Disabled by default."
+
+[[option]]
+  name       = "pbvPreprocessMw"
+  category   = "expert"
+  long       = "pbv-preprocess-mw"
+  type       = "bool"
+  default    = "false"
+  help       = "enable the multi-width PBV preprocessing pass (pbv-mw), which runs BEFORE the translation to NIA: annihilate a low extract at a zero/sign extension whose source width matches, and push a low extract inward through pbvor/pbvxor/pbvadd/pbvsub/pbvmul to reach one. The width side condition is resolved against the asserted `(= (pbvsize x) V)` links, which a syntactic rewriter cannot do. pbvand is excluded to avoid looping with pbv-reverse-extract-and. Disabled by default."
+
+[[option]]
+  name       = "pbvShiftAddDistrib"
+  category   = "expert"
+  long       = "pbv-shift-add-distrib"
+  type       = "bool"
+  default    = "false"
+  help       = "in the pbv-mw pass, pull a left shift out from under a matching right shift: `((x << c) + y) >> c` becomes `x + (y >> c)`, looking through the zero extensions that a multi-width goal puts on every operand and requiring the two shift amounts to agree once those are stripped. This is parabit's div_mult_self, `(x + y*z) div y = (x div y) + z`, in the only place cvc5 can still apply it: the int-blaster purifies its divisions into skolems while translating, so no integer-level rule can see the pattern afterwards. The rewrite is valid only when `x << c` does not overflow the width it is computed at, which for a p-bit x and a u-bit shift amount is `s >= p + (2^u - 1)` -- a NON-linear condition, discharged against the order facts, where 2^u is treated as an opaque atom so the constraint is linear in {s, p, 2^u} and matches the precondition such goals state verbatim. Disabled by default."
+
+[[option]]
+  name       = "pbvSextToZext"
+  category   = "expert"
+  long       = "pbv-sext-to-zext"
+  type       = "bool"
+  default    = "false"
+  help       = "in the pbv-mw preprocessing pass, replace a sign extension whose argument is itself a zero extension by a single zero extension: `(psign_extend n (pzero_extend m x))` becomes `(pzero_extend (n+m) x)` when `m >= 1` is entailed by the asserted width constraints. Sound because a zero extension by at least one bit forces the most significant bit of its result to 0, so the outer sign extension pads with zeros. The rewriter cannot do this -- the mixed zext/sext merge is unsound WITHOUT the side condition, which is why pbv-merge-* omits it -- and `m` is typically a difference like `(- w9 w4)` that is positive only by virtue of an asserted `(> w9 w4)`, so the condition is discharged against the order facts of the assertions. This removes psign_extend's integer encoding (an msb ITE plus two pow2 terms and a product) outright, which matters most when such terms are multiplied together. Implies the pbv-mw pass is run. Disabled by default."
+
+[[option]]
+  name       = "pbvShiftGuardElim"
+  category   = "expert"
+  long       = "pbv-shift-guard-elim"
+  type       = "bool"
+  default    = "false"
+  help       = "collapse the degenerate-case guards in the translated shift encoding. bvlshrSym/bvshlSym wrap the division (resp. multiplication) in `ite(2^e = 0, .., ..)` tests, which can only be taken when an exponent is negative; when `e >= 0` is entailed by the assertions the test is false and the ite is its else branch. Removing it matters less for the ite itself than for what it hides: with the guard in place the nested-division merge `(a div 2^y) div 2^z -> a div 2^(y+z)` of --pbv-to-int-reduce-mods=cav26 can never match, because the inner division is buried under two ites, and neither can the surrounding mod be dropped. parabit's shr_def/shl_def carry no guard at all, which is why it merges these directly. Runs inside the mod-reduction post-pass and discharges `e >= 0` against its order facts, so it needs --pbv-to-int-reduce-mods set. Disabled by default."
+
+[[option]]
+  name       = "pbvModVarWidths"
+  category   = "expert"
+  long       = "pbv-mod-var-widths"
+  type       = "bool"
+  default    = "false"
+  help       = "let the --pbv-to-int-reduce-mods post-pass read a variable's width off the RANGE constraints instead of only off the term. The translation states a symbol's width as a separate assertion `x < 2^p` rather than keeping it in the term, so widthOf() returns nothing for a bare variable and the width-bound rules that would delete an enclosing mod never fire -- which is why `mod 2^t` survives on a sum of values that provably cannot reach 2^t, and is then purified into a quotient skolem the arithmetic solver has to reason about nonlinearly. Harvesting those range atoms into a variable-to-width map restores the information parabit keeps syntactically in `(bw p a)`, and lets the sum and product bounds (`1 + max(wa,wb)` and `wa + wb`) discharge. Requires --pbv-to-int-reduce-mods to be set to a mode that uses those bounds (cav26 or all). Disabled by default."
+
+[[option]]
+  name       = "pbvRwBool"
+  category   = "expert"
+  long       = "pbv-rw-bool"
+  type       = "bool"
+  default    = "false"
+  help       = "decide an equality between two bitwise PBV terms by comparing the Boolean functions they denote. pbvand/pbvor/pbvxor/pbvnot act bitwise and in parallel, so two such terms are equal at EVERY width exactly when their Boolean functions over the shared leaves agree; the rewriter collects the distinct leaves, evaluates both sides over all assignments to them, and rewrites the equality to true when the results match. This decides the whole and/or/xor/not fragment, which the parabit e-graph reaches only by saturating with its bidirectional xor_as_or_and and and_distrib rules -- a destructive rewriter cannot saturate, so it needs a decision procedure instead. A leaf that is not itself bitwise is treated as an independent variable, which is sound (agreement for every value of the leaf implies agreement for its actual value) but means the check can decline a genuine equality rather than assert a false one; `(int_to_pbv k 0)` is recognized as the all-zero constant. Only equality is ever concluded, never disequality: differing tables do not refute the goal, since the leaves need not be independent. Skipped when the term has more than --pbv-rw-bool-cap distinct leaves. Disabled by default."
+
+[[option]]
+  name       = "pbvRwBoolCap"
+  category   = "expert"
+  long       = "pbv-rw-bool-cap=N"
+  type       = "uint64_t"
+  default    = "12"
+  help       = "skip the --pbv-rw-bool decision procedure when the two sides together have more than N distinct leaves; the table it builds has 2^N rows."
+
+[[option]]
+  name       = "pbvRwNnf"
+  category   = "expert"
+  long       = "pbv-rw-nnf"
+  type       = "bool"
+  default    = "false"
+  help       = "push pbvnot inward through pbvand and pbvor (De Morgan), producing a negation normal form: `(pbvnot (pbvand x y))` becomes `(pbvor (pbvnot x) (pbvnot y))` and dually for pbvor. Terminating, since every application moves a negation one level toward the leaves, and together with pbv-not-idemp it drives negations down to the atoms. On its own it enlarges the term; the point is that it is a CANONICAL direction, so two bitwise terms that differ only by De Morgan become syntactically identical and an equality between them closes in the rewriter rather than reaching the arithmetic solver as a piand query. Most effective combined with --pbv-rw-ac (which canonicalizes the and/or nesting) and --pbv-rw-mw=cav26 (which turns `x xor all-ones` into `pbvnot x`, the form these goals are usually written in). This is what the parabit e-graph gets from demorg_and/demorg_or. Disabled by default."
+
+[[option]]
+  name       = "pbvRwShiftZextMerge"
+  category   = "expert"
+  long       = "pbv-rw-shift-zext-merge"
+  type       = "bool"
+  default    = "false"
+  help       = "merge two shifts separated by a zero extension: `(pbvlshr (pzero_extend n (pbvlshr x y)) z)` becomes `(pbvlshr (pzero_extend n x) (pbvadd (pzero_extend n y) z))`, and dually for pbvshl. The existing pbv-merge-lshr/shl rules require the two shifts to be adjacent, so they never match a MULTI-WIDTH goal, where the intermediate width appears as exactly such an extension between them -- and by the time the term reaches the mod-reduction pass the int-blaster has already purified the divisions into skolems, so the integer-level nested-division merge cannot see them either. Zero extension preserves the value, so the composition is x div 2^(y+z), the same identity pbv-merge-lshr proves for adjacent shifts, and it carries the same overflow guard on y+z. Disabled by default."
+
+[[option]]
+  name       = "pbvRwAc"
+  category   = "expert"
+  long       = "pbv-rw-ac"
+  type       = "bool"
+  default    = "false"
+  help       = "normalize the associative-commutative PBV operators -- the bitwise pbvand, pbvor, pbvxor and the arithmetic pbvadd, pbvmul -- in the rewriter: flatten a nested same-kind chain into its leaf list, order the leaves canonically, drop duplicate leaves for pbvand/pbvor only (idempotence; x xor x is 0, x + x is 2x and x * x is a square, so duplicates must survive there), and rebuild a right-associated binary chain. Two terms that differ only by the associativity or commutativity of these operators then become syntactically identical, so an equality between them closes in the rewriter instead of being handed to the arithmetic solver as a piand query -- which is what the parabit e-graph achieves with its and.assoc/and.commute rules. pbvxor leaves are ordered but NOT deduplicated, since x xor x is 0 rather than x. Note the encoding takes the width of a bitwise term from its FIRST operand, so reordering relies on the admissibility constraints (which equate the operand widths) being asserted, as the translation always does. Disabled by default."
+
+[[option]]
+  name       = "pbvRwMw"
+  category   = "expert"
+  long       = "pbv-rw-mw=MODE"
+  type       = "PbvRwMwMode"
+  default    = "NONE"
+  help       = "enable the opt-in PBV rewrite rule families (see --pbv-rw-mw=help). These carry no width side condition, so unlike the pbv-mw preprocessing rules they work as ordinary rewrites. The mode selects WHICH family to apply, so that the two can be benchmarked against each other. Disabled by default."
+  help_mode  = "Opt-in PBV rewrite families. 'base' is the `pbv-merge-*` set plus `pbv-mul-two`: shift-of-shift merge for pbvlshr/pbvshl (overflow-guarded, since y+z wraps mod 2^k), nested extension merge for pzero_extend/psign_extend, and the strength reduction `x * 2 -> x + x` (which keeps its RW_B-style name because it sits with pbv-mul-one/pbv-mul-zero, but is not part of RW_B and is gated individually); pbvashr and mixed zext/sext stacking are excluded as unsound. 'cav26' is the `pbv-c26-*` set, the bitwise identities adapted from the parabit rewrite set (CAV 2026 artifact) that RW_B omits: and-with-all-ones, and-with-itself, and-with-its-own-negation, xor-with-all-ones, and the two's-complement form `~x + 1 -> -x`. These fill in the pbvand side of the rule set, which had only the zero and extract-merge cases while pbvor and pbvxor already had their idempotence and negation rules. 'all' runs both."
+[[option.mode.NONE]]
+  name = "none"
+  help = "Apply neither family (default)."
+[[option.mode.BASE]]
+  name = "base"
+  help = "The `pbv-merge-*` rules plus `pbv-mul-two`: shift-of-shift merge, nested extension merge, and `x * 2 -> x + x`."
+[[option.mode.CAV26]]
+  name = "cav26"
+  help = "The `pbv-c26-*` bitwise identities adapted from the parabit (CAV 2026) rule set only."
+[[option.mode.ALL]]
+  name = "all"
+  help = "Run both families."
+
+[[option]]
   name       = "analyzeExpInstances"
   category   = "expert"
   long       = "analyze-exp-instances=MODE"
@@ -446,12 +600,48 @@ name   = "SMT Layer"
 [[option.mode.NONE]]
   name = "none"
   help = "Disabled (default; exp-analyzer pass not run)."
-[[option.mode.REWRITE]]
-  name = "rewrite"
-  help = "Translate every constant-base power instance to the constant-offset-related instance (same base) with the most occurrences (no report)."
-[[option.mode.REWRITE_REPORT]]
-  name = "rewrite-report"
-  help = "Print the numbered power-instance report, then apply the rewrite."
+[[option.mode.MULTIPLY_ONLY]]
+  name = "multiply-only"
+  help = "Within each group of same-base powers whose exponents differ by a constant, translate every instance to the smallest-exponent one, multiplying up by base^d (never dividing). Handles constant (incl. negative) and symbolic bases (no report)."
+[[option.mode.MULTIPLY_ONLY_REPORT]]
+  name = "multiply-only-report"
+  help = "Same pivot choice as 'multiply-only' (smallest exponent, multiply up), but also print the numbered power-instance report before applying."
+[[option.mode.COMMON]]
+  name = "common"
+  help = "Like 'multiply-only' but pivot on the MOST FREQUENT instance in each group instead of the smallest: larger powers are multiplied up, smaller powers are divided down by base^d. The division loses the divisibility fact base|base^n, so this is usually weaker than 'multiply-only' -- provided for A/B comparison (no report)."
+[[option.mode.COMMON_REPORT]]
+  name = "common-report"
+  help = "Same pivot choice as 'common' (most frequent, divide down), but also print the numbered power-instance report before applying."
+[[option.mode.MULTIPLY_ONLY_L3]]
+  name = "multiply-only-l3"
+  help = "Run 'multiply-only' first, then add only the L3 FACTORIZATION lemma for the powers it could not merge: for two surviving same-base powers b^x, b^y whose exponents the assertions order x <= y with a SYMBOLIC gap, assert b^y = b^x * b^(y-x) (plus b^(y-x) >= 1). Gives the solver the divisibility b^x | b^y. Any base, not just 2."
+[[option.mode.MULTIPLY_ONLY_L3_REPORT]]
+  name = "multiply-only-l3-report"
+  help = "Same as 'multiply-only-l3', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.MULTIPLY_ONLY_L3_COMMON]]
+  name = "multiply-only-l3-common"
+  help = "Like 'multiply-only-l3', but emit at most ONE factorization per upper power instead of one per ordered pair: for each b^y, relate it only to the most frequently occurring lower power b^x (ties break on the smaller exponent, then deterministically). This caps the introduced b^(y-x) terms at one per upper power rather than one per pair, trading coverage for a smaller formula. L4 is not emitted in this mode; use 'multiply-only-l3-common-l4' for that."
+[[option.mode.MULTIPLY_ONLY_L3_COMMON_REPORT]]
+  name = "multiply-only-l3-common-report"
+  help = "Same as 'multiply-only-l3-common', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.MULTIPLY_ONLY_L3_COMMON_L4]]
+  name = "multiply-only-l3-common-l4"
+  help = "Like 'multiply-only-l3-common' (one factorization per upper power, pivoting on the most frequent lower power), but ALSO add L4 for that same chosen pair when x < y is entailed and b >= 2. Because L4 is emitted only for the pair L3 already picked, it reuses the b^(y-x) term L3 introduces and so adds no new power term -- unlike 'multiply-only-relate', which relates every ordered pair. Use this to get L4's strict monotonicity at the smaller formula size of the 'common' pivot."
+[[option.mode.MULTIPLY_ONLY_L3_COMMON_L4_REPORT]]
+  name = "multiply-only-l3-common-l4-report"
+  help = "Same as 'multiply-only-l3-common-l4', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.MULTIPLY_ONLY_L4]]
+  name = "multiply-only-l4"
+  help = "Run 'multiply-only' first, then add only the L4 STRICT MONOTONICITY lemma: for two surviving same-base powers b^x, b^y with x < y entailed and b >= 2, assert b^y >= b * b^x (plus b^(y-x) >= b). Unlike L3 this adds no new pow2 term beyond b^(y-x). Any base, not just 2."
+[[option.mode.MULTIPLY_ONLY_L4_REPORT]]
+  name = "multiply-only-l4-report"
+  help = "Same as 'multiply-only-l4', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.MULTIPLY_ONLY_RELATE]]
+  name = "multiply-only-relate"
+  help = "Run 'multiply-only' first, then add BOTH L3 and L4 (see 'multiply-only-l3' and 'multiply-only-l4'). Side conditions must be entailed by the assertions, so the lemmas are always implied by the input."
+[[option.mode.MULTIPLY_ONLY_RELATE_REPORT]]
+  name = "multiply-only-relate-report"
+  help = "Same as 'multiply-only-relate', but also print the numbered power-instance report and the emitted relational lemmas."
 
 [[option]]
   name       = "BVAndIntegerGranularity"

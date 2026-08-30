@@ -122,7 +122,7 @@ bool flattenAndCollectSum(TNode t,
 ArithRewriter::ArithRewriter(NodeManager* nm,
                              OperatorElim& oe,
                              bool expertEnabled,
-                             options::ExpRewriteMode expRewriteMode,
+                             const std::string& expRewriteMode,
                              uint64_t expRewriteUnrollBound)
     : TheoryRewriter(nm),
       d_opElim(oe),
@@ -804,9 +804,8 @@ RewriteResponse ArithRewriter::postRewriteMult(TNode t){
     // Triggers REWRITE_AGAIN so the resulting ADD over exponents is
     // normalized and any newly-constant exponent gets folded by
     // postRewriteExp on the next pass.
-    options::ExpRewriteMode erm = d_expRewriteMode;
-    if (erm == options::ExpRewriteMode::ALL
-        || erm == options::ExpRewriteMode::FUSE)
+    const ExpFeatureSet& erm = d_expRewriteMode;
+    if (erm.has("fuse"))
     {
       // base -> list of exponents (insertion-ordered via vector-of-pairs)
       std::vector<std::pair<Node, std::vector<Node>>> baseGroups;
@@ -852,6 +851,65 @@ RewriteResponse ArithRewriter::postRewriteMult(TNode t){
           {
             Node sumExp = d_nm->mkNode(Kind::ADD, g.second);
             newLeafs.emplace_back(d_nm->mkNode(Kind::EXP, g.first, sumExp));
+          }
+        }
+        Node fusedRet = rewriter::mkMultTerm(d_nm, ran, std::move(newLeafs));
+        fusedRet = rewriter::maybeEnsureReal(t.getType(), fusedRet);
+        return RewriteResponse(REWRITE_AGAIN, fusedRet);
+      }
+    }
+
+    // Same-exponent EXP product fusion: gather EXP children sharing an
+    // exponent, multiply their bases into a single EXP. Gated by
+    // --arith-exp-rewrites. EIA-valid: x^|y| * z^|y| = (x*z)^|y|, i.e.
+    // exp(x,y)*exp(z,y) = exp(x*z,y). REWRITE_AGAIN normalizes the new base
+    // product (and, under 'all', lets same-base fusion apply on re-entry).
+    if (erm.has("fuse-base"))
+    {
+      // exponent -> list of bases (insertion-ordered via vector-of-pairs)
+      std::vector<std::pair<Node, std::vector<Node>>> expGroups;
+      std::vector<Node> nonExpLeafs;
+      for (const Node& l : leafs)
+      {
+        if (l.getKind() == Kind::EXP)
+        {
+          auto it = std::find_if(
+              expGroups.begin(), expGroups.end(),
+              [&l](const std::pair<Node, std::vector<Node>>& p) {
+                return p.first == l[1];
+              });
+          if (it == expGroups.end())
+          {
+            expGroups.emplace_back(l[1], std::vector<Node>{l[0]});
+          }
+          else
+          {
+            it->second.push_back(l[0]);
+          }
+        }
+        else
+        {
+          nonExpLeafs.emplace_back(l);
+        }
+      }
+      bool fused = std::any_of(
+          expGroups.begin(), expGroups.end(),
+          [](const std::pair<Node, std::vector<Node>>& p) {
+            return p.second.size() >= 2;
+          });
+      if (fused)
+      {
+        std::vector<Node> newLeafs = std::move(nonExpLeafs);
+        for (auto& g : expGroups)
+        {
+          if (g.second.size() == 1)
+          {
+            newLeafs.emplace_back(d_nm->mkNode(Kind::EXP, g.second[0], g.first));
+          }
+          else
+          {
+            Node prodBase = d_nm->mkNode(Kind::MULT, g.second);
+            newLeafs.emplace_back(d_nm->mkNode(Kind::EXP, prodBase, g.first));
           }
         }
         Node fusedRet = rewriter::mkMultTerm(d_nm, ran, std::move(newLeafs));
@@ -1321,12 +1379,25 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
   // Optional partial-constant rewrites gated by --arith-exp-rewrites.
   // These drop EXP nodes from the term graph before the nl-ext solver
   // ever sees them.
-  options::ExpRewriteMode erm = d_expRewriteMode;
-  bool doConst = (erm == options::ExpRewriteMode::ALL
-                  || erm == options::ExpRewriteMode::CONST);
+  const ExpFeatureSet& erm = d_expRewriteMode;
+  bool doConst = erm.has("const") || erm.has("const-compose");
   // Note: ALL deliberately excludes UNROLL — unrolling can blow up term size
   // for moderate constants and must be opted into explicitly.
-  bool doUnroll = (erm == options::ExpRewriteMode::UNROLL);
+  // 'unroll' is never implied by 'all': it can blow up term size, so it must
+  // always be named explicitly.
+  bool doUnroll = erm.has("unroll");
+  bool doCompose = erm.has("compose") || erm.has("const-compose");
+
+  if (doCompose && t[0].getKind() == Kind::EXP)
+  {
+    // Exponent composition: EXP(EXP(x,y),z) -> EXP(x, y*z).
+    // EIA-valid since (x^|y|)^|z| = x^(|y|*|z|) = x^|y*z| for all integers.
+    // REWRITE_AGAIN so the new product exponent is normalized (and folded if
+    // it becomes constant).
+    Node yz = nm->mkNode(Kind::MULT, t[0][1], t[1]);
+    return RewriteResponse(REWRITE_AGAIN,
+                           nm->mkNode(Kind::EXP, t[0][0], yz));
+  }
 
   if (doConst)
   {
@@ -1349,18 +1420,32 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
 
   if (doUnroll && t[1].isConst())
   {
-    // EXP(s, c) -> s * s * ... * s  (c copies)  for small constant c >= 2.
-    // Skips negative c (the existing const-const branch above already covers
-    // any case where both args are constants; here we are still partial).
+    // SwInE Sect. 4.1, rewrite rule 1, under this solver's EXP semantics:
+    //
+    //   EXP(s, c)  ->  s * ... * s            (|c| copies)   for c >= 2
+    //   EXP(s, c)  ->  1 div (s * ... * s)    (|c| copies)   for c <= -2
+    //   EXP(s, -1) ->  1 div s
+    //
+    // The paper's EIA reads exp(x,c) as x^|c|, so it unrolls negative constant
+    // exponents to the same product. Here exp(x,c) is 1 div x^|c| for c < 0,
+    // so the negative case unrolls to the reciprocal of that product instead.
+    // c in {0, 1} is left to the 'const' schema above.
     const Rational& r = t[1].getConst<Rational>();
-    if (r.sgn() > 0 && r.isIntegral())
+    if (r.isIntegral())
     {
       Integer ci = r.getNumerator();
-      if (ci >= Integer(2) && ci <= Integer(d_expRewriteUnrollBound))
+      Integer mag = ci.abs();
+      if (mag >= Integer(1) && mag <= Integer(d_expRewriteUnrollBound)
+          && !(ci.sgn() > 0 && mag == Integer(1)))
       {
-        uint64_t c = ci.toUnsignedInt();
-        std::vector<Node> factors(c, t[0]);
-        Node prod = nm->mkNode(Kind::MULT, factors);
+        uint64_t c = mag.toUnsignedInt();
+        Node prod = c == 1 ? Node(t[0])
+                           : nm->mkNode(Kind::MULT, std::vector<Node>(c, t[0]));
+        if (ci.sgn() < 0)
+        {
+          prod = nm->mkNode(
+              Kind::INTS_DIVISION, nm->mkConstInt(Rational(1)), prod);
+        }
         return RewriteResponse(REWRITE_AGAIN, prod);
       }
     }

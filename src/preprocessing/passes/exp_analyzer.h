@@ -36,6 +36,20 @@ class ExpAnalyzer : public PreprocessingPass
  protected:
   PreprocessingPassResult applyInternal(
       AssertionPipeline* assertionsToPreprocess) override;
+
+  /**
+   * --analyze-exp-instances=multiply-only-{l3,l4,relate,l3-common,
+   * l3-common-l4}: assert L3/L4 relational lemmas between same-base powers
+   * whose exponent gap is symbolic (so multiply-only could not fold them).
+   * doL3/doL4 select the lemmas; l3Common restricts each upper power to a
+   * single lower pivot, in which case L4 (if enabled) is emitted for that same
+   * pair. See the .cpp for the exact conditions.
+   */
+  void addRelationalLemmas(AssertionPipeline* assertionsToPreprocess,
+                           bool report,
+                           bool doL3,
+                           bool doL4,
+                           bool l3Common);
 };
 
 }  // namespace passes

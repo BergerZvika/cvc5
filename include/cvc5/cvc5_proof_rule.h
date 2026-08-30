@@ -4412,8 +4412,30 @@ enum ENUM(ProofRewriteRule)
   EVALUE(PBV_NEG_IDEMP),
   /** Auto-generated from RARE rule pbv-mul-one */
   EVALUE(PBV_MUL_ONE),
+  /** Auto-generated from RARE rule pbv-mul-two */
+  EVALUE(PBV_MUL_TWO),
   /** Auto-generated from RARE rule pbv-mul-zero */
   EVALUE(PBV_MUL_ZERO),
+  /** Auto-generated from RARE rule pbv-merge-lshr */
+  EVALUE(PBV_MERGE_LSHR),
+  /** Auto-generated from RARE rule pbv-merge-shl */
+  EVALUE(PBV_MERGE_SHL),
+  /** Auto-generated from RARE rule pbv-merge-zext */
+  EVALUE(PBV_MERGE_ZEXT),
+  /** Auto-generated from RARE rule pbv-merge-sext */
+  EVALUE(PBV_MERGE_SEXT),
+  /** Auto-generated from RARE rule pbv-c26-and-allones */
+  EVALUE(PBV_C26_AND_ALLONES),
+  /** Auto-generated from RARE rule pbv-c26-and-self */
+  EVALUE(PBV_C26_AND_SELF),
+  /** Auto-generated from RARE rule pbv-c26-and-not-self */
+  EVALUE(PBV_C26_AND_NOT_SELF),
+  /** Auto-generated from RARE rule pbv-c26-and-one */
+  EVALUE(PBV_C26_AND_ONE),
+  /** Auto-generated from RARE rule pbv-c26-xor-allones */
+  EVALUE(PBV_C26_XOR_ALLONES),
+  /** Auto-generated from RARE rule pbv-c26-not-plus-one */
+  EVALUE(PBV_C26_NOT_PLUS_ONE),
   /** Auto-generated from RARE rule pbv-zero-extend-eliminate */
   EVALUE(PBV_ZERO_EXTEND_ELIMINATE),
   /** Auto-generated from RARE rule pbv-sign-extend-eliminate */

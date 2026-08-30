@@ -74,6 +74,14 @@ libcvc5_add_sources(
   preprocessing/passes/bv_to_bool.h
   preprocessing/passes/bv_to_int.cpp
   preprocessing/passes/bv_to_int.h
+  preprocessing/passes/int_order_facts.cpp
+  preprocessing/passes/int_order_facts.h
+  preprocessing/passes/exp_mod_pow.cpp
+  preprocessing/passes/exp_mod_pow.h
+  preprocessing/passes/pbv_mod_reducer.cpp
+  preprocessing/passes/pbv_mod_reducer.h
+  preprocessing/passes/pbv_mw.cpp
+  preprocessing/passes/pbv_mw.h
   preprocessing/passes/pbv_to_int.cpp
   preprocessing/passes/pbv_to_int.h
   preprocessing/passes/exp_analyzer.cpp
@@ -399,6 +407,8 @@ libcvc5_add_sources(
   theory/arith/arith_proof_rcons.h
   theory/arith/arith_proof_utilities.cpp
   theory/arith/arith_proof_utilities.h
+  theory/arith/exp_feature_set.cpp
+  theory/arith/exp_feature_set.h
   theory/arith/arith_rewriter.cpp
   theory/arith/arith_rewriter.h
   theory/arith/arith_subs.cpp

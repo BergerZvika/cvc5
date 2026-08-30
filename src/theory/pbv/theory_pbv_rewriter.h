@@ -26,6 +26,7 @@
 #ifndef CVC5__THEORY__PBV__THEORY_PBV_REWRITER_H
 #define CVC5__THEORY__PBV__THEORY_PBV_REWRITER_H
 
+#include "options/smt_options.h"
 #include "theory/theory_rewriter.h"
 
 namespace cvc5::internal {
@@ -34,7 +35,35 @@ namespace pbv {
 
 class TheoryPbvRewriter : public TheoryRewriter {
  public:
-  TheoryPbvRewriter(NodeManager* nm) : TheoryRewriter(nm) {}
+  /**
+   * @param rwMw value of --pbv-rw-mw=MODE, selecting which opt-in rule
+   * families to apply:
+   *   none   neither (default)
+   *   base   the `pbv-merge-*` rules: shift-of-shift merge, nested
+   *          extension merge
+   *   cav26  the `pbv-c26-*` rules: bitwise identities adapted from the
+   *          parabit rule set
+   *   all    both
+   */
+  TheoryPbvRewriter(NodeManager* nm,
+                    options::PbvRwMwMode rwMw = options::PbvRwMwMode::NONE,
+                    bool rwAc = false,
+                    bool rwNnf = false,
+                    bool rwBool = false,
+                    uint64_t boolCap = 12,
+                    bool rwShiftZext = false)
+      : TheoryRewriter(nm),
+        d_rwMerge(rwMw == options::PbvRwMwMode::BASE
+                  || rwMw == options::PbvRwMwMode::ALL),
+        d_rwCav26(rwMw == options::PbvRwMwMode::CAV26
+                  || rwMw == options::PbvRwMwMode::ALL),
+        d_rwAc(rwAc),
+        d_rwNnf(rwNnf),
+        d_rwBool(rwBool),
+        d_boolCap(boolCap),
+        d_rwShiftZext(rwShiftZext)
+  {
+  }
 
   /**
    * Post-rewrite: apply the full RW_B rule set (Appendix A).
@@ -49,6 +78,27 @@ class TheoryPbvRewriter : public TheoryRewriter {
   RewriteResponse preRewrite(TNode node) override {
     return RewriteResponse(REWRITE_DONE, node);
   }
+
+ private:
+  /** --pbv-rw-mw=base|all: enable the `pbv-merge-*` rules. */
+  bool d_rwMerge;
+  /** --pbv-rw-mw=cav26|all: enable the `pbv-c26-*` rules. */
+  bool d_rwCav26;
+  /** --pbv-rw-ac: AC-normalize pbvand/pbvor/pbvxor. */
+  bool d_rwAc;
+  /** --pbv-rw-nnf: push pbvnot inward through pbvand/pbvor (De Morgan). */
+  bool d_rwNnf;
+  /** --pbv-rw-bool: decide bitwise equalities by Boolean evaluation. */
+  bool d_rwBool;
+  /** --pbv-rw-bool-cap: give up past this many distinct leaves. */
+  uint64_t d_boolCap;
+  /** --pbv-rw-shift-zext-merge: merge shifts across a zero extension. */
+  bool d_rwShiftZext;
+
+  /** Gather the distinct non-bitwise leaves of a bitwise term. */
+  static bool boolLeaves(TNode n, std::vector<Node>& leaves, uint64_t cap);
+  /** Evaluate a bitwise term under an assignment (bit i of `asg` per leaf). */
+  static bool boolEval(TNode n, const std::vector<Node>& leaves, uint64_t asg);
 };
 
 }  // namespace pbv

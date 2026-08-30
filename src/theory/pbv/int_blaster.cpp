@@ -135,7 +135,15 @@ TrustNode PIntBlaster::trustedIntBlast(Node n,
   // Both functions skip BOUND_VARIABLEs; per-quantifier guards are reattached
   // when the FORALL/EXISTS node is rebuilt in translateWithChildren.
   addRangeConstraints(n, lemmas);
+  // Record ADM(n) separately from RANGE(n): --pbv-type-check discharges the
+  // admissibility constraint on its own, as the width-only obligation that
+  // decides whether the formula is well-sorted at all.
+  size_t admStart = lemmas.size();
   addAdmConstraints(n, lemmas);
+  for (size_t i = admStart, iend = lemmas.size(); i < iend; ++i)
+  {
+    d_admConstraints.push_back(lemmas[i].getProven());
+  }
 
   // Step 2 — post-order CONV traversal
   std::vector<Node> toVisit;
@@ -905,6 +913,19 @@ void PIntBlaster::addRangeConstraints(Node e,
       toVisit.push_back(child);
     }
   }
+}
+
+std::unordered_set<Node> PIntBlaster::getWidthSymbols() const
+{
+  std::unordered_set<Node> res;
+  for (const auto& kv : d_kappaClassSkolem)
+  {
+    if (!kv.second.isNull() && !kv.second.isConst())
+    {
+      res.insert(kv.second);
+    }
+  }
+  return res;
 }
 
 void PIntBlaster::addAdmConstraints(Node e,

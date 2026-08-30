@@ -210,6 +210,24 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
    */
   void addAdmConstraints(Node e, std::vector<TrustNode>& lemmas);
 
+ public:
+  /**
+   * The ADM(n) constraints emitted during translation, i.e. the local width
+   * side conditions of each sub-term: equal operand widths for the
+   * equal-width operators, matching branch widths for ITE, and positivity of
+   * every free PBV variable's width. This is the shallow type-check query of
+   * --pbv-type-check; it is a conjunction of linear integer constraints.
+   */
+  const std::vector<Node>& getAdmConstraints() const { return d_admConstraints; }
+  /**
+   * The Int constants standing for widths: one per kappa-equivalence class.
+   * A constraint all of whose free symbols lie in this set is a constraint on
+   * widths alone, which is what the deep type-check query keeps.
+   */
+  std::unordered_set<Node> getWidthSymbols() const;
+
+ private:
+
   /**
    * Pre-pass before translation: walk every quantifier in n and, for each
    * bound PBV variable x, register a fresh bound Int variable in d_kappaMap
@@ -277,6 +295,12 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
    */
   Node normalizeWidthExpr(Node n);
 
+ public:
+  /** Public wrapper: map every `(pbvsize V)` in n to its kappa term. */
+  Node toWidthTerm(Node n) { return normalizeWidthExpr(n); }
+
+ private:
+
   // ---- caches (context-dependent) ----------------------------------------
   /** Memoization for makeBinary. */
   CDNodeMap d_binarizeCache;
@@ -290,6 +314,8 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
   std::unordered_map<Node, Node> d_kappaUnionFind;
   /** κ classes → allocated named Int constant (k, k1, k2, …). */
   std::unordered_map<Node, Node> d_kappaClassSkolem;
+  /** ADM(n) constraints, recorded separately for --pbv-type-check. */
+  std::vector<Node> d_admConstraints;
   /**
    * κ classes with a known explicit width expression. When a PBV variable
    * is constrained (via int_to_pbv K _) to have width K (some Int term in

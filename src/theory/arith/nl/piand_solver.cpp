@@ -86,11 +86,8 @@ void PIAndSolver::checkInitialRefine()
       d_initRefine.insert(i);
       // Node twok = nm->mkNode(Kind::POW2, k);
       Node twok = nm->mkNode(Kind::EXP, d_two, k);
-      Node arg0Mod = nm->mkNode(Kind::INTS_MODULUS, x, twok);
-      Node arg1Mod = nm->mkNode(Kind::INTS_MODULUS, y, twok);
       Node arg0Mod2 = nm->mkNode(Kind::INTS_MODULUS, x, d_two);
       Node arg1Mod2 = nm->mkNode(Kind::INTS_MODULUS, y, d_two);
-      Node plus = nm->mkNode(Kind::ADD, x, y);
       Node twok_minus_one = nm->mkNode(Kind::SUB, twok, d_one);
       Node k_gt_0 = nm->mkNode(Kind::GT, k, d_zero);
       Node x_geq_zero = nm->mkNode(Kind::GEQ, x, d_zero);
@@ -142,33 +139,6 @@ void PIAndSolver::checkInitialRefine()
       Node i_leq_y = nm->mkNode(Kind::LEQ, i, y);
       conj.push_back(nm->mkNode(Kind::IMPLIES, y_geq_zero, i_leq_y));
 
-      // strict upper bound: k > 0 -> piand(k,x,y) < 2^k.
-      // Mirrors the unconditional iand bound iand(x,y) < 2^k. Without it the
-      // abstract piand value is unbounded above when x, y are large compound
-      // sums (as after int-blasting), and branch-and-bound never stabilizes.
-      // conj.push_back(
-      //     nm->mkNode(Kind::IMPLIES, k_gt_0, nm->mkNode(Kind::LT, i, twok)));
-
-      // modular upper bounds: piand(k,x,y) <= x mod 2^k and <= y mod 2^k.
-      // Tighter than range2/range3 above, which bound by the raw operands;
-      // x mod 2^k is always in [0, 2^k), so this is the bound that actually
-      // boxes the result regardless of how large x, y are.
-      // conj.push_back(nm->mkNode(Kind::LEQ, i, arg0Mod));
-      // conj.push_back(nm->mkNode(Kind::LEQ, i, arg1Mod));
-
-      // Extra initial-refine lemmas below are gated by --piand-lemmas=MODE.
-      // Each schema is enabled by ALL or by its specific mode.
-      options::PIAndLemmaMode plm = options().arith.piAndLemmaMode;
-
-      // diagonal: x = y -> piand(k,x,y) = x mod 2^k. Matches the iand
-      // init-refine lemma; pins the result exactly on the diagonal.
-      if (plm == options::PIAndLemmaMode::ALL
-          || plm == options::PIAndLemmaMode::DIAGONAL)
-      {
-        conj.push_back(
-            nm->mkNode(Kind::IMPLIES, x.eqNode(y), i.eqNode(arg0Mod)));
-      }
-
       // non-positive bitwidth: k <= 0 -> piand(k,x, y) = 0
       Node k_le_0 = nm->mkNode(Kind::LEQ, k, d_zero);
       conj.push_back(nm->mkNode(Kind::IMPLIES, k_le_0, i.eqNode(d_zero)));
@@ -183,42 +153,6 @@ void PIAndSolver::checkInitialRefine()
       Node arg0Mod2_eq_zero = nm->mkNode(Kind::EQUAL, arg0Mod2, d_zero);
       conj.push_back(nm->mkNode(
           Kind::IMPLIES, arg0Mod2_eq_zero, piand_mod_two.eqNode(d_zero)));
-
-      // CARRY: k > 0 /\ x,y in [0, 2^k) => 2*piand(k,x,y) <= x + y.
-      // Each bit of piand is 1 only when both x and y have a 1 there, so
-      // bit-by-bit min(b_x, b_y) <= (b_x + b_y)/2; summing gives the bound.
-      if (plm == options::PIAndLemmaMode::ALL
-          || plm == options::PIAndLemmaMode::CARRY)
-      {
-        Node two_i = nm->mkNode(Kind::MULT, d_two, i);
-        Node carry_bound = nm->mkNode(Kind::LEQ, two_i, plus);
-        Node carry_assum = nm->mkNode(Kind::AND, k_gt_0, x_range, y_range);
-        conj.push_back(nm->mkNode(Kind::IMPLIES, carry_assum, carry_bound));
-      }
-
-      // LSB equivalence: k > 0 => piand(k,x,y) mod 2 = (x mod 2)*(y mod 2).
-      // Strictly stronger than the two one-sided LSB implications above; the
-      // existing ones remain as cheap propagators.
-      if (plm == options::PIAndLemmaMode::ALL
-          || plm == options::PIAndLemmaMode::LSB)
-      {
-        Node lsb_prod = nm->mkNode(Kind::MULT, arg0Mod2, arg1Mod2);
-        Node lsb_eq = nm->mkNode(Kind::EQUAL, piand_mod_two, lsb_prod);
-        conj.push_back(nm->mkNode(Kind::IMPLIES, k_gt_0, lsb_eq));
-      }
-
-      // COMPLEMENT: k > 0 /\ x in [0, 2^k) /\ y = 2^k - 1 - x
-      //             => piand(k,x,y) = 0.
-      // Eager analogue of the existing checkFullRefine contradiction lemma.
-      if (plm == options::PIAndLemmaMode::ALL
-          || plm == options::PIAndLemmaMode::COMPLEMENT)
-      {
-        Node compl_rhs = nm->mkNode(Kind::SUB, twok_minus_one, x);
-        Node compl_eq = nm->mkNode(Kind::EQUAL, y, compl_rhs);
-        Node compl_assum = nm->mkNode(Kind::AND, k_gt_0, x_range, compl_eq);
-        conj.push_back(
-            nm->mkNode(Kind::IMPLIES, compl_assum, i.eqNode(d_zero)));
-      }
 
       // insert lemmas
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(Kind::AND, conj);
@@ -310,6 +244,89 @@ void PIAndSolver::checkFullRefine()
       Node y_geq_zero = nm->mkNode(Kind::GEQ, y, d_zero);
       Node y_lt_pow2 = nm->mkNode(Kind::LT, y, twok);
       Node y_range = nm->mkNode(Kind::AND, y_geq_zero, y_lt_pow2);
+
+      // ----------------------------------------------------------------------
+      // Flag-gated refinement lemmas (--piand-lemmas=MODE and the
+      // --piand-lean-refine bool). Emitted lazily HERE in full-refine rather
+      // than eagerly in checkInitialRefine: each schema fires only when the
+      // current (already-wrong) model value of piand actually violates it.
+      // ipow2 = 2^model_k and model_k are constants checked above.
+      options::PIAndLemmaMode plm = options().arith.piAndLemmaMode;
+      bool wantLean = options().arith.piAndLeanRefine
+                      || plm == options::PIAndLemmaMode::LEAN
+                      || plm == options::PIAndLemmaMode::ALL;
+      Integer xModPow2 = model_k > 0 ? model_x.modByPow2(model_k.getUnsignedLong())
+                                     : Integer(0);
+      Integer yModPow2 = model_k > 0 ? model_y.modByPow2(model_k.getUnsignedLong())
+                                     : Integer(0);
+
+      // CARRY: k>0 /\ x,y in [0,2^k) => 2*piand(k,x,y) <= x+y.
+      if ((plm == options::PIAndLemmaMode::ALL
+           || plm == options::PIAndLemmaMode::CARRY)
+          && model_k > 0 && model_x >= 0 && model_x < ipow2 && model_y >= 0
+          && model_y < ipow2 && itwo * model_piand > model_x + model_y)
+      {
+        Node two_i = nm->mkNode(Kind::MULT, d_two, i);
+        Node carry_bound = nm->mkNode(Kind::LEQ, two_i, nm->mkNode(Kind::ADD, x, y));
+        Node carry_assum = nm->mkNode(Kind::AND, k_gt_0, x_range, y_range);
+        d_im.addPendingLemma(nm->mkNode(Kind::IMPLIES, carry_assum, carry_bound),
+                             InferenceId::ARITH_NL_PIAND_INIT_REFINE, nullptr,
+                             true);
+      }
+
+      // LSB equivalence: k>0 => piand mod 2 = (x mod 2)*(y mod 2).
+      if ((plm == options::PIAndLemmaMode::ALL
+           || plm == options::PIAndLemmaMode::LSB)
+          && model_k > 0
+          && model_piand.euclidianDivideRemainder(itwo)
+                 != model_x.euclidianDivideRemainder(itwo)
+                        * model_y.euclidianDivideRemainder(itwo))
+      {
+        Node piand_mod_two = nm->mkNode(Kind::INTS_MODULUS, i, d_two);
+        Node lsb_prod = nm->mkNode(Kind::MULT, arg0Mod2, arg1Mod2);
+        Node lsb_eq = nm->mkNode(Kind::EQUAL, piand_mod_two, lsb_prod);
+        d_im.addPendingLemma(nm->mkNode(Kind::IMPLIES, k_gt_0, lsb_eq),
+                             InferenceId::ARITH_NL_PIAND_INIT_REFINE, nullptr,
+                             true);
+      }
+
+      // LEAN tight bounds (iand-style). Each conjunct guarded by its own model
+      // violation, sent as one lemma when any fires.
+      if (wantLean)
+      {
+        // arg0Mod / arg1Mod (x,y mod 2^k) are defined in the enclosing scope.
+        Node k_le_0 = nm->mkNode(Kind::LEQ, k, d_zero);
+        std::vector<Node> lean;
+        // 0 <= piand
+        if (model_piand < 0)
+          lean.push_back(nm->mkNode(Kind::LEQ, d_zero, i));
+        // k>0 => piand < 2^k
+        if (model_k > 0 && model_piand >= ipow2)
+          lean.push_back(nm->mkNode(Kind::IMPLIES, k_gt_0,
+                                    nm->mkNode(Kind::LT, i, twok)));
+        // k>0 => piand <= x mod 2^k
+        if (model_k > 0 && model_piand > xModPow2)
+          lean.push_back(nm->mkNode(Kind::IMPLIES, k_gt_0,
+                                    nm->mkNode(Kind::LEQ, i, arg0Mod)));
+        // k>0 => piand <= y mod 2^k
+        if (model_k > 0 && model_piand > yModPow2)
+          lean.push_back(nm->mkNode(Kind::IMPLIES, k_gt_0,
+                                    nm->mkNode(Kind::LEQ, i, arg1Mod)));
+        // x=y => piand = x mod 2^k
+        if (model_k > 0 && model_x == model_y && model_piand != xModPow2)
+          lean.push_back(
+              nm->mkNode(Kind::IMPLIES, x.eqNode(y), i.eqNode(arg0Mod)));
+        // k<=0 => piand = 0
+        if (model_k <= 0 && model_piand != 0)
+          lean.push_back(nm->mkNode(Kind::IMPLIES, k_le_0, i.eqNode(d_zero)));
+        if (!lean.empty())
+        {
+          Node lem = lean.size() == 1 ? lean[0] : nm->mkNode(Kind::AND, lean);
+          d_im.addPendingLemma(lem, InferenceId::ARITH_NL_PIAND_INIT_REFINE,
+                               nullptr, true);
+        }
+      }
+
       int j = -1;
       for (const Node& n : is.second)
       {

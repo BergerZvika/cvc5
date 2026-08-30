@@ -203,11 +203,23 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
 
   // Assertions MUST BE guaranteed to be rewritten by this point
   applyPass("rewrite", ap);
+  // Multi-width PBV rewrites must run BEFORE the translation: psign_extend's
+  // integer encoding is an msb ITE plus two extra pow2 terms and a product,
+  // which cannot be undone once built.
+  if (options().smt.pbvPreprocessMw || options().smt.pbvSextToZext
+      || options().smt.pbvShiftAddDistrib)
+  {
+    applyPass("pbv-mw", ap);
+  }
   applyPass("pbv-to-int", ap);
   if (options().smt.analyzeExpInstances
       != options::AnalyzeExpInstancesMode::NONE)
   {
     applyPass("exp-analyzer", ap);
+  }
+  if (options().smt.expReduceModPow)
+  {
+    applyPass("exp-mod-pow", ap);
   }
 
   // Convert non-top-level Booleans to bit-vectors of size 1

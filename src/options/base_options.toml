@@ -205,6 +205,10 @@ name   = "Base"
   help = "print top-level substitutions learned during preprocessing"
   description = "With ``-o subs``, cvc5 prints top-level substitutions learned during preprocessing."
   example-file = "regress0/printer/print_subs.smt2"
+[[option.mode.PBV_TYPE_CHECK]]
+  name = "pbv-type-check"
+  help = "print the width-only query that --pbv-type-check discharges, and its verdict"
+  description = "With ``-o pbv-type-check``, cvc5 prints the width-only query built by ``--pbv-type-check`` -- the admissibility constraint for the shallow checker, plus the width constraints the formula itself imposes for the deep one -- together with the verdict returned for it."
 [[option.mode.POST_ASSERTS]]
   name = "post-asserts"
   help = "print a benchmark corresponding to the assertions of the input problem after preprocessing"

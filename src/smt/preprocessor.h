@@ -92,6 +92,15 @@ class Preprocessor : protected EnvObj
   /** Get the preprocess proof generator */
   PreprocessProofGenerator* getPreprocessProofGenerator();
 
+  /**
+   * The preprocessing pass context, needed by the solver to reach data a pass
+   * recorded for it (currently the --pbv-type-check width query).
+   */
+  preprocessing::PreprocessingPassContext* getPassContext()
+  {
+    return d_ppContext.get();
+  }
+
  private:
   /** Pointer to the preprocess proof generator. */
   PreprocessProofGenerator* d_pppg;

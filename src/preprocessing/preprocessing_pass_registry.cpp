@@ -32,8 +32,10 @@
 #include "preprocessing/passes/bv_intro_pow2.h"
 #include "preprocessing/passes/bv_to_bool.h"
 #include "preprocessing/passes/bv_to_int.h"
+#include "preprocessing/passes/pbv_mw.h"
 #include "preprocessing/passes/pbv_to_int.h"
 #include "preprocessing/passes/exp_analyzer.h"
+#include "preprocessing/passes/exp_mod_pow.h"
 #include "preprocessing/passes/extended_rewriter_pass.h"
 #include "preprocessing/passes/ff_bitsum.h"
 #include "preprocessing/passes/ff_disjunctive_bit.h"
@@ -132,8 +134,10 @@ PreprocessingPassRegistry::PreprocessingPassRegistry()
   registerPassInfo("global-negate", callCtor<GlobalNegate>);
   registerPassInfo("int-to-bv", callCtor<IntToBV>);
   registerPassInfo("bv-to-int", callCtor<BVToInt>);
+  registerPassInfo("pbv-mw", callCtor<PbvMw>);
   registerPassInfo("pbv-to-int", callCtor<PBVToInt>);
   registerPassInfo("exp-analyzer", callCtor<ExpAnalyzer>);
+  registerPassInfo("exp-mod-pow", callCtor<ExpModPow>);
   registerPassInfo("ff-bitsum", callCtor<FfBitsum>);
   registerPassInfo("ff-disjunctive-bit", callCtor<FfDisjunctiveBit>);
   registerPassInfo("learned-rewrite", callCtor<LearnedRewrite>);

@@ -23,6 +23,9 @@
 #include "options/arith_options.h"
 #include "theory/arith/rewriter/addition.h"
 #include "theory/arith/rewrites.h"
+#include <string>
+
+#include "theory/arith/exp_feature_set.h"
 #include "theory/theory_rewriter.h"
 
 namespace cvc5::internal {
@@ -37,9 +40,8 @@ class ArithRewriter : public TheoryRewriter
   ArithRewriter(NodeManager* nm,
                 OperatorElim& oe,
                 bool expertEnabled = true,
-                options::ExpRewriteMode expRewriteMode =
-                    options::ExpRewriteMode::NONE,
-                uint64_t expRewriteUnrollBound = 4);
+                const std::string& expRewriteMode = "none",
+                uint64_t expRewriteUnrollBound = 2);
   RewriteResponse preRewrite(TNode n) override;
   RewriteResponse postRewrite(TNode n) override;
   /**
@@ -141,7 +143,7 @@ class ArithRewriter : public TheoryRewriter
   /** Whether we permit reasoning about expert extensions of arithmetic */
   bool d_expertEnabled;
   /** Which extra EXP rewrite schemas to fire (default NONE). */
-  options::ExpRewriteMode d_expRewriteMode;
+  ExpFeatureSet d_expRewriteMode;
   /** Upper bound for the bounded-unroll EXP rewrite. */
   uint64_t d_expRewriteUnrollBound;
 }; /* class ArithRewriter */

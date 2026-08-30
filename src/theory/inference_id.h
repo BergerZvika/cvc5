@@ -201,8 +201,16 @@ enum class InferenceId
   ARITH_NL_EXP_BOUND_CASE_REFINE,
   // monotonicity refinements (ExpSolver::checkFullRefine)
   ARITH_NL_EXP_MONOTONE_REFINE,
+  // guarded same-base fusion t1>=0 /\ t2>=0 => exp(s,t1)*exp(s,t2) = exp(s,t1+t2)
+  ARITH_NL_EXP_FUSE_REFINE,
   // induction refinements (ExpSolver::checkFullRefine)
   ARITH_NL_EXP_INDUCTION_REFINE,
+  // symmetry lemma (sym1-sym3), full-refinement loop
+  ARITH_NL_EXP_SYMMETRY_REFINE,
+  // exponent-composition lemma, full-refinement loop
+  ARITH_NL_EXP_COMPOSE_REFINE,
+  // guarded exponent bound emitted by phasing (--arith-exp-phasing)
+  ARITH_NL_EXP_PHASE_BOUND,
   //-------------------- nonlinear coverings solver
   // conflict / infeasible subset obtained from coverings
   ARITH_NL_COVERING_CONFLICT,
