@@ -145,6 +145,14 @@ theory::TrustSubstitutionMap& Env::getTopLevelSubstitutions()
   return *d_topLevelSubs.get();
 }
 
+void Env::recordLemmaForCheck(const Node& lem)
+{
+  if (d_checkLemmasSet.insert(lem).second)
+  {
+    d_checkLemmas.push_back(lem);
+  }
+}
+
 const LogicInfo& Env::getLogicInfo() const { return d_logic; }
 
 StatisticsRegistry& Env::getStatisticsRegistry()

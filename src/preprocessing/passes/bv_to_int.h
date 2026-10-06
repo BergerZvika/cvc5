@@ -61,6 +61,11 @@ class BVToInt : public PreprocessingPass
   std::unique_ptr<PIntBlaster> d_pIntBlaster;
   // BV-var → fresh PBV-var the lifter substituted in.
   std::unordered_map<Node, Node> d_bvVarPbv;
+  // --pbv-lift-uf: BV-sorted function symbol → fresh PBV-sorted symbol.
+  std::unordered_map<Node, Node> d_bvUfPbv;
+  // --pbv-lift-uf: lifted application with a (formerly) BV range → its
+  // width, to be pinned by `(= (pbvsize app) k)` alongside the variables.
+  std::unordered_map<Node, uint32_t> d_pbvUfApps;
   // Memoization for liftBvToPbv.
   std::unordered_map<Node, Node> d_liftCache;
 };

@@ -54,8 +54,9 @@ class TheoryPbvRewriter : public TheoryRewriter {
                     bool rwShiftZext = false)
       : TheoryRewriter(nm),
         d_rwMerge(rwMw == options::PbvRwMwMode::BASE
-                  || rwMw == options::PbvRwMwMode::ALL),
+                  || rwMw == options::PbvRwMwMode::BASE_CAV26),
         d_rwCav26(rwMw == options::PbvRwMwMode::CAV26
+                  || rwMw == options::PbvRwMwMode::BASE_CAV26
                   || rwMw == options::PbvRwMwMode::ALL),
         d_rwAc(rwAc),
         d_rwNnf(rwNnf),

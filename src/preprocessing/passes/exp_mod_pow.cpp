@@ -183,58 +183,14 @@ Node ExpModPow::tryRules(TNode n)
         Kind::ITE, nm->mkNode(Kind::GEQ, a, b), zero, Node(num));
   }
 
-  // Rule 2: (mod (* x (exp s a)) (exp s b))
-  //           -> ite(a >= b, 0, (* (mod x (exp s (- b a))) (exp s a)))
-  //
-  // Exactly one factor may be a power of s: with two of them the product is
-  // s^(a1+a2) times the rest, which rule 2 would split at the wrong exponent.
-  // Leaving that case to a later pass over the fused term is the conservative
-  // choice.
-  if (num.getKind() == Kind::MULT || num.getKind() == Kind::NONLINEAR_MULT)
-  {
-    Node pow;
-    std::vector<Node> rest;
-    for (const Node& f : num)
-    {
-      if (pow.isNull() && f.getKind() == Kind::EXP && f[0] == s
-          && nonNeg(f[1]))
-      {
-        pow = f;
-      }
-      else
-      {
-        rest.push_back(f);
-      }
-    }
-    if (!pow.isNull() && !rest.empty())
-    {
-      Node a = pow[1];
-      d_numMult++;
-      Order ord = compareExps(a, b);
-      if (ord == Order::GEQ)
-      {
-        // s^b divides s^a divides x*s^a. Nothing else needs building -- in
-        // particular not s^(b-a), whose exponent would be negative here.
-        return zero;
-      }
-      Node x = rest.size() == 1 ? rest[0] : nm->mkNode(Kind::MULT, rest);
-      // s^(b-a). Where a < b this exponent is at least 1 and the divisor at
-      // least 2; when the order is unknown the guard below makes the a >= b
-      // case unreachable, where it would otherwise be a negative exponent.
-      Node gap = nm->mkNode(Kind::EXP, Node(s), nm->mkNode(Kind::SUB, b, a));
-      // INTS_MODULUS_TOTAL for the introduced modulus: the divisor is
-      // non-zero wherever this branch is reachable, so it agrees with the
-      // partial operator there, and it carries no division-by-zero guard.
-      Node inner = nm->mkNode(Kind::INTS_MODULUS_TOTAL, x, gap);
-      Node body = nm->mkNode(Kind::MULT, inner, pow);
-      if (ord == Order::LT)
-      {
-        return body;
-      }
-      return nm->mkNode(
-          Kind::ITE, nm->mkNode(Kind::GEQ, a, b), zero, body);
-    }
-  }
+  // Rule 2 -- (mod (* x (exp s a)) (exp s b)) -> ite(a >= b, 0,
+  // (* (mod x (exp s (- b a))) (exp s a))) -- used to be applied here as well.
+  // --exp-reduce-mod-pow is now rule 1 only: the product shape is left alone.
+  // The identity itself is valid (it is (z*s^a) mod s^b = (z mod s^(b-a))*s^a
+  // for a <= b, which holds under Euclidean mod for negative z too), so this
+  // is a deliberate narrowing of the pass, not a soundness repair. Restoring
+  // it would mean giving it its own token rather than folding it back in.
+
   return Node::null();
 }
 
@@ -297,8 +253,7 @@ PreprocessingPassResult ExpModPow::applyInternal(
     }
   }
   Trace("exp-mod-pow") << "ExpModPow: rewrote " << d_numPow
-                       << " (mod pow pow) and " << d_numMult
-                       << " (mod (* x pow) pow) terms, " << d_numDecided
+                       << " (mod pow pow) terms, " << d_numDecided
                        << " of them with the exponent order entailed"
                        << std::endl;
   return PreprocessingPassResult::NO_CONFLICT;

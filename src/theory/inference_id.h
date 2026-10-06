@@ -205,7 +205,7 @@ enum class InferenceId
   ARITH_NL_EXP_FUSE_REFINE,
   // induction refinements (ExpSolver::checkFullRefine)
   ARITH_NL_EXP_INDUCTION_REFINE,
-  // symmetry lemma (sym1-sym3), full-refinement loop
+  // symmetry lemma (sym1, sym2), full-refinement loop
   ARITH_NL_EXP_SYMMETRY_REFINE,
   // exponent-composition lemma, full-refinement loop
   ARITH_NL_EXP_COMPOSE_REFINE,

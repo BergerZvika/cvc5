@@ -43,7 +43,8 @@ ExpSolver::ExpSolver(Env& env,
       d_phaseEmitted(userContext()),
       d_im(im),
       d_model(model),
-      d_initRefine(userContext())
+      d_initRefine(userContext()),
+      d_halveIntroduced(userContext())
 {
   NodeManager* nm = nodeManager();
   d_false = nm->mkConst(false);
@@ -76,6 +77,11 @@ void ExpSolver::initLastCall(const std::vector<Node>& xts)
 void ExpSolver::checkInitialRefine()
 {
   Trace("exp-check") << "ExpSolver::checkInitialRefine" << std::endl;
+  // --arith-exp-value-only: no axioms, only value refinement (below).
+  if (options().arith.expValueOnly)
+  {
+    return;
+  }
   NodeManager* nm = nodeManager();
   for (const Node& i : d_exps)
   {
@@ -87,13 +93,15 @@ void ExpSolver::checkInitialRefine()
     d_initRefine.insert(i);
     // initial refinement lemmas
     std::vector<Node> conj;
+    ExpFeatureSet lselNegOne(options().arith.expLemmasMode,
+                             ExpFeatureAxis::LEMMAS);
     Node s = i[0];
     Node t = i[1];
 
     // Phasing (Alg. 3 line 9): put this term's exponent under the level-b
     // bound, so the sat-phase is entered before the first full-refinement
     // round rather than after it.
-    if (options().arith.expPhasing)
+    if (isPhasingOn())
     {
       emitPhaseSplit(i);
     }
@@ -106,6 +114,20 @@ void ExpSolver::checkInitialRefine()
                                 nm->mkNode(Kind::AND, sgt0, tgeq0),
                                 igt0));
 
+    // non-negative:  s >= 0  =>  exp(s, t) >= 0
+    //
+    // The sign half of `positive`, with NO constraint on t -- which is what
+    // makes it worth stating separately, since `positive` says nothing at all
+    // once t < 0. For s >= 0 and t < 0 the value is 0 (s = 0 or s >= 2) or 1
+    // (s = 1), never negative; for t >= 0 a non-negative base has a
+    // non-negative power. Cheap and linear, so it is emitted unconditionally
+    // alongside the other baseline axioms rather than behind a lemma token.
+    // Note it is NOT redundant given `positive`: the two together still leave
+    // s < 0 unconstrained, which is correct -- exp(-2,3) is negative.
+    conj.push_back(nm->mkNode(Kind::IMPLIES,
+                              nm->mkNode(Kind::GEQ, s, d_zero),
+                              nm->mkNode(Kind::GEQ, i, d_zero)));
+
     // even:  s mod 2 = 0 /\ t >= 1  =>  exp(s, t) mod 2 = 0
     Node smod2 = nm->mkNode(Kind::INTS_MODULUS, s, d_two);
     Node imod2 = nm->mkNode(Kind::INTS_MODULUS, i, d_two);
@@ -115,6 +137,28 @@ void ExpSolver::checkInitialRefine()
     conj.push_back(nm->mkNode(Kind::IMPLIES,
                                 nm->mkNode(Kind::AND, sEven, tgeq1),
                                 iEven));
+
+    // odd:  s mod 2 = 1 /\ t >= 0  =>  exp(s, t) mod 2 = 1
+    //
+    // The parity mirror of `even`, and emitted unconditionally alongside it.
+    // Two differences from `even` are deliberate:
+    //
+    //   * t >= 0 rather than t >= 1. `even` must exclude t = 0 because
+    //     exp(s,0) = 1 is odd; the odd case has no such exception, since 1 is
+    //     exactly what this concludes.
+    //   * t >= 0 is required, though. For t < 0 and |s| >= 3 odd the value is
+    //     0, which is even -- e.g. exp(3,-1) = 0. Only |s| = 1 escapes that,
+    //     and those two cases are already pinned by bnd4 and neg-one, so
+    //     adding them back as a disjunct would buy nothing.
+    //
+    // INTS_MODULUS is Euclidean here, so `s mod 2 = 1` covers negative odd
+    // bases too: (-3) mod 2 = 1, and exp(-3,3) = -27 with (-27) mod 2 = 1.
+    // Checked exhaustively over s, t in [-15,15].
+    Node sOdd = nm->mkNode(Kind::EQUAL, smod2, d_one);
+    Node iOdd = nm->mkNode(Kind::EQUAL, imod2, d_one);
+    conj.push_back(nm->mkNode(Kind::IMPLIES,
+                              nm->mkNode(Kind::AND, sOdd, tgeq0),
+                              iOdd));
     
     // div1:  s >= 2 /\ t >= 0  =>  t div exp(s, t) = 0
     Node sgeq2 = nm->mkNode(Kind::GEQ, s, d_two);
@@ -143,14 +187,13 @@ void ExpSolver::checkInitialRefine()
                                 seq1,
                                 i.eqNode(d_one)));
     
-    // neg -1: s = -1 /\ t < 0 =>  exp(s, t) = exp(s,-t)
+    // neg -1 (s = -1 /\ t < 0 => exp(s,t) = exp(s,-t)) used to be emitted
+    // here, once per EXP term. It now lives in the full-refinement loop
+    // instead -- see checkNegOneRefine. The move matters because the lemma
+    // introduces the mirror term exp(s,-t): as an initial-refine axiom that
+    // happened for EVERY exp term whether or not any model needed it, and
+    // each mirror is itself an EXP term that then gets its own axiom batch.
     Node tlt0 = nm->mkNode(Kind::LT, t, d_zero);
-    Node seqm1  = nm->mkNode(Kind::EQUAL, s, d_negone);
-    Node negT   = nm->mkNode(Kind::NEG, t);
-    Node mirror = nm->mkNode(Kind::EXP, s, negT);
-    conj.push_back(nm->mkNode(Kind::IMPLIES,
-                                nm->mkNode(Kind::AND, seqm1, tlt0),
-                                i.eqNode(mirror)));
     
     // neg 0: s = 0 /\ t < 0 =>  exp(s, t) = (div 1 0)
     // Node onediv0 = nm->mkNode(Kind::INTS_DIVISION, d_one, d_zero);
@@ -175,8 +218,81 @@ void ExpSolver::checkInitialRefine()
     if (options().arith.expNegRecipMode
         == options::ExpNegRecipMode::INIT)
     {
+      Node mirror =
+          nm->mkNode(Kind::EXP, s, nm->mkNode(Kind::NEG, t));
       Node recip = nm->mkNode(Kind::INTS_DIVISION, d_one, mirror);
       conj.push_back(nm->mkNode(Kind::IMPLIES, tlt0, i.eqNode(recip)));
+    }
+
+    // Parity of the base -1 (--arith-exp-negone-parity):
+    //   s = -1  =>  ite(t mod 2 = 0, exp(s,t) = 1, exp(s,t) = -1)
+    //
+    // The existing `neg-one` full-refine lemma only mirrors exp(-1,t) onto
+    // exp(-1,-t), and `bnd4`/the range axioms only bound the value; nothing
+    // pins WHICH of -1 and 1 it is. That is the whole difficulty in the LoAT
+    // size0* families, where (-1)^t is the only exponential present and every
+    // other power is polynomial: with the value pinned, a case split on
+    // t mod 2 leaves an ordinary polynomial problem in each branch.
+    //
+    // Sound for every integer exponent. For t >= 0 this is the definition of
+    // (-1)^t; for t < 0, `**` gives 1 div exp(s,-t), which is 1 div (+-1) and
+    // so again +-1, and Euclidean `t mod 2` has the same value at t and -t.
+    // Introduces no new EXP term, so unlike `neg-one` it costs nothing beyond
+    // the mod term itself.
+    // Either spelling turns it on: the standalone boolean, or the
+    // 'negone-parity' token on --arith-exp-lemmas.
+    if (options().arith.expNegOneParity || lselNegOne.has("negone-parity"))
+    {
+      Node tEven = nm->mkNode(
+          Kind::EQUAL, nm->mkNode(Kind::INTS_MODULUS, t, d_two), d_zero);
+      conj.push_back(nm->mkNode(
+          Kind::IMPLIES,
+          nm->mkNode(Kind::EQUAL, s, d_negone),
+          nm->mkNode(Kind::ITE, tEven, i.eqNode(d_one), i.eqNode(d_negone))));
+    }
+
+    // Predecessor chain (--arith-exp-halving=N):
+    //   t >= 1        =>  exp(s, t)   = s * exp(s, t-1)
+    //   t - 1 >= 1    =>  exp(s, t-1) = s * exp(s, t-2)   (and so on, N steps)
+    //
+    // Sound for every base: the guard keeps the smaller exponent non-negative,
+    // where `**` agrees with ordinary exponentiation. What the lemma really
+    // buys is the TERM exp(s, t-1), linked to exp(s, t) by an equation. In the
+    // PBV-to-int encoding the width power 2^k is ground while the sign-bit
+    // threshold 2^(k-1) appears only under a quantifier, so nothing at ground
+    // level ties the two together and the arithmetic solver cannot pin down
+    // the translations of `min`/`max`. One step of this chain supplies exactly
+    // that missing equation.
+    //
+    // Introducing terms is also why the chain has to be bounded: each new
+    // exp(s, t-i) is itself an EXP term that reaches d_exps on a later round,
+    // so the terms recorded in d_halveIntroduced are skipped here.
+    // Either spelling turns it on: the standalone --arith-exp-halving=N, or
+    // the 'halving' token on --arith-exp-lemmas, which means depth 1 (the
+    // documented typical use). A depth given explicitly wins, so the token
+    // never shortens a chain the user asked to be longer.
+    uint64_t halveDepth = options().arith.expHalvingDepth;
+    if (halveDepth == 0 && lselNegOne.has("halving"))
+    {
+      halveDepth = 1;
+    }
+    if (halveDepth > 0
+        && d_halveIntroduced.find(i) == d_halveIntroduced.end())
+    {
+      Node cur = i;
+      Node curT = t;
+      for (uint64_t d = 0; d < halveDepth; ++d)
+      {
+        Node prevT = nm->mkNode(Kind::SUB, curT, d_one);
+        Node prev = nm->mkNode(Kind::EXP, s, prevT);
+        d_halveIntroduced.insert(prev);
+        d_halveIntroduced.insert(rewrite(prev));
+        conj.push_back(nm->mkNode(Kind::IMPLIES,
+                                  nm->mkNode(Kind::GEQ, curT, d_one),
+                                  cur.eqNode(nm->mkNode(Kind::MULT, s, prev))));
+        cur = prev;
+        curT = prevT;
+      }
     }
 
     // SwInE static lemma families (Frohn & Giesl), gated by
@@ -186,12 +302,13 @@ void ExpSolver::checkInitialRefine()
       // Static (non-model) families emitted as initial-refine axioms. Symmetry
       // is NOT here; it is emitted only in the full-refine loop (see
       // checkSymmetryRefine).
-      ExpFeatureSet lsel(options().arith.expLemmasMode);
-      // --arith-exp-bounding=refine moves these into the refinement loop, where
-      // they are filtered by what the candidate model actually violates.
-      if (lsel.has("bounding")
-          && options().arith.expBoundingMode
-                 != options::ExpBoundingMode::REFINE)
+      ExpFeatureSet lsel(options().arith.expLemmasMode, ExpFeatureAxis::LEMMAS);
+      // 'init' and 'both' emit the static axiom batch here; 'refine' emits
+      // only from the refinement loop, filtered by what the candidate model
+      // actually violates; 'none' emits nothing.
+      options::ExpBoundingMode bmode = getBoundingMode(lsel);
+      if (bmode == options::ExpBoundingMode::INIT
+          || bmode == options::ExpBoundingMode::BOTH)
       {
         addBoundingLemmas(i, conj);
       }
@@ -200,12 +317,41 @@ void ExpSolver::checkInitialRefine()
     Node lem = nm->mkAnd(conj);
     Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; INIT_REFINE"
                         << std::endl;
-    d_im.addPendingLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
+    addExpLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
   }
 }
 
 
 // void ExpSolver::sortExpsBasedOnModel() {}
+
+bool ExpSolver::isPhasingOn() const
+{
+  // Phasing predates the --arith-exp-lemmas list and kept its own boolean;
+  // the 'phasing' token is the second spelling, and either turns it on. It is
+  // 'all' implies it, since on the lemma axis 'all' means every selection
+  // without exception -- phasing included, though it is a search strategy
+  // rather than a lemma family.
+  return options().arith.expPhasing
+         || ExpFeatureSet(options().arith.expLemmasMode, ExpFeatureAxis::LEMMAS)
+                .has("phasing");
+}
+
+options::ExpBoundingMode ExpSolver::getBoundingMode(
+    const ExpFeatureSet& lsel) const
+{
+  // --arith-exp-bounding and the 'bounding' token of --arith-exp-lemmas are
+  // two spellings of the same switch. An explicit --arith-exp-bounding always
+  // wins, so it can both place the family (init/refine/both) without naming
+  // the token and switch it off ('none') despite the token.
+  if (options().arith.expBoundingModeWasSetByUser)
+  {
+    return options().arith.expBoundingMode;
+  }
+  // Otherwise the token decides: naming it selects the strongest placement,
+  // omitting it leaves the family off entirely.
+  return lsel.has("bounding") ? options::ExpBoundingMode::BOTH
+                              : options::ExpBoundingMode::NONE;
+}
 
 void ExpSolver::checkFullRefine() {
     Trace("exp-check") << "ExpSolver::checkFullRefine" << std::endl;
@@ -213,28 +359,33 @@ void ExpSolver::checkFullRefine() {
   // Phasing (Alg. 3 lines 11-15): an unsat-phase counterexample is discarded
   // without computing any refinement lemmas -- raising the bound and going
   // back to the sat-phase is the whole of the round.
-  if (options().arith.expPhasing && checkPhase())
+  if (isPhasingOn() && checkPhase())
   {
     return;
   }
   // SwInE model-based lemma families gated by --arith-exp-lemmas.
-  ExpFeatureSet lsel(options().arith.expLemmasMode);
+  ExpFeatureSet lsel(options().arith.expLemmasMode, ExpFeatureAxis::LEMMAS);
   bool primeOn = lsel.has("prime");
   bool indOn = lsel.has("induction");
   bool interpOn = lsel.has("interpolation");
-  // The 'symmetry' mode -- and the aggregate 'all-lemmas'/'all' -- emit the
+  // The 'symmetry' mode -- and the 'all'/'pbv' aggregates -- emit the
   // symmetry lemmas here (in the full-refinement loop), for model-violating
   // terms.
   bool symRefineOn = lsel.has("symmetry");
   // The 'compose' mode emits the composition lemma in the full-refinement loop
   // for model-violating nested EXP terms.
   bool composeOn = lsel.has("compose");
+  // Where the bnd2/bnd3/bnd5 family goes, resolved once for the whole round.
+  options::ExpBoundingMode boundingMode = getBoundingMode(lsel);
   // General monotonicity (Frohn & Giesl `mon`). It subsumes the two same-base
   // pair lemmas below, so those are suppressed while it is on, and it runs as
   // its own scan over ALL pairs -- the loop below only ever reaches a pair
   // whose first element is itself model-violating, which would hide exactly
   // the cross-base cases `mon` exists for.
-  bool genMon = options().arith.expMonGeneral;
+  // Selectable either as the 'mon' token of --arith-exp-lemmas or with the
+  // standalone --arith-exp-mon-general boolean; the two are OR-ed. 'all' and
+  // 'pbv' both imply it.
+  bool genMon = options().arith.expMonGeneral || lsel.has("mon");
   if (genMon)
   {
     checkMonotonicityRefine();
@@ -242,9 +393,15 @@ void ExpSolver::checkFullRefine() {
   // Guarded same-base fusion. Like monotonicity this is its own scan over ALL
   // pairs rather than a step inside the violating-term loop below: the pair
   // that closes the goal need not have a violating term as its first element.
-  if (lsel.has("fuse"))
+  bool fuseModel = lsel.has("fuse-model");
+  if (lsel.has("fuse") || fuseModel)
   {
-    checkFuseRefine();
+    checkFuseRefine(fuseModel);
+  }
+  // Same-exponent fusion. Its own scan over all pairs, for the same reason.
+  if (lsel.has("fuse-base"))
+  {
+    checkFuseBaseRefine();
   }
 //   sortPow2sBasedOnModel();
   // add lemmas for each pow2 term
@@ -259,6 +416,17 @@ void ExpSolver::checkFullRefine() {
     Node valS = d_model.computeConcreteModelValue(s);
     Node valt = d_model.computeConcreteModelValue(t);
 
+    // A concrete value can fail to fold to a constant: a nested exponent such
+    // as 2^(2^k - ...) whose intermediate value is too large for the rewriter
+    // to expand stays symbolic. Reading getConst on such a node is undefined
+    // (it crashed in a subsolver whose models wander into huge exponents), so
+    // a term without constant values is skipped this round.
+    if (!valS.isConst() || !valt.isConst() || !valExpxAbstract.isConst())
+    {
+      Trace("exp-check") << "* " << n << ": non-constant model value, skip"
+                         << std::endl;
+      continue;
+    }
     Integer model_s = valS.getConst<Rational>().getNumerator();
     Integer model_t = valt.getConst<Rational>().getNumerator();
     Integer expx = valExpxAbstract.getConst<Rational>().getNumerator();
@@ -276,6 +444,20 @@ void ExpSolver::checkFullRefine() {
       continue;
     }
 
+    // --arith-exp-value-only: nothing but the evaluated point.
+    if (options().arith.expValueOnly)
+    {
+      Node vlem = valueBasedLemma(n);
+      addExpLemma(
+          vlem, InferenceId::ARITH_NL_POW2_VALUE_REFINE, nullptr, true);
+      continue;
+    }
+
+    // neg-one, moved here from initial refine. Emitted only when the model
+    // satisfies the antecedent, so the mirror term is introduced only for the
+    // terms a candidate model actually points at.
+    checkNegOneRefine(n, model_s, model_t);
+
     // add monotinicity lemmas
     for (uint64_t j = i + 1; j < size; j++)
     {
@@ -284,7 +466,10 @@ void ExpSolver::checkFullRefine() {
       Node ty = m[1];
       Node valSY = d_model.computeConcreteModelValue(sy);
       Node valTY = d_model.computeConcreteModelValue(ty);
-
+      if (!valSY.isConst() || !valTY.isConst())
+      {
+        continue;  // see the guard above
+      }
       Integer model_sy = valSY.getConst<Rational>().getNumerator();
       Integer model_ty = valTY.getConst<Rational>().getNumerator();
       // Abstract model value of m = exp(s_y, t_y). This must be m's own value
@@ -293,6 +478,10 @@ void ExpSolver::checkFullRefine() {
       // valExpxAbstract, i.e. expx, so every such guard was trivially true and
       // the lemmas fired even when the model already satisfied them.)
       Node valExpyAbstract = d_model.computeAbstractModelValue(m);
+      if (!valExpyAbstract.isConst())
+      {
+        continue;
+      }
       Integer expy = valExpyAbstract.getConst<Rational>().getNumerator();
 
       // monotonicity: 0 <= s_x /\ s_x = s_y /\ 0 <= t_x /\ t_x < t_y => exp(s_x, t_x) < exp(s_y,t_y)
@@ -307,7 +496,7 @@ void ExpSolver::checkFullRefine() {
         Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
         Node conclusion = nm->mkNode(Kind::LT, n, m);
         Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-        d_im.addPendingLemma(
+        addExpLemma(
             lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
       }
       // monotonicity: 0 <= s_x /\ s_x = s_y /\ 0 <= t_y /\ t_y < t_x => exp(s_x, t_x) > exp(s_y,t_y)
@@ -322,7 +511,7 @@ void ExpSolver::checkFullRefine() {
         Node assumption = nm->mkNode(Kind::AND, assumption_pos, assumption_xgt);
         Node conclusion = nm->mkNode(Kind::LT, m, n);
         Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-        d_im.addPendingLemma(
+        addExpLemma(
             lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
       }
       // DOUBLING: for adjacent EXP exponents with a common base,
@@ -343,7 +532,7 @@ void ExpSolver::checkFullRefine() {
           Node sxTimesN = nm->mkNode(Kind::MULT, n[0], n);
           Node conclDbl = nm->mkNode(Kind::EQUAL, m, sxTimesN);
           Node dblLem = nm->mkNode(Kind::IMPLIES, assumDbl, conclDbl);
-          d_im.addPendingLemma(
+          addExpLemma(
               dblLem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr,
               true);
         }
@@ -363,7 +552,7 @@ void ExpSolver::checkFullRefine() {
           Node xmulsx = nm->mkNode(Kind::MULT, n, n[0]);
           Node conclusion = nm->mkNode(Kind::LEQ, xmulsx, m);
           Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-          d_im.addPendingLemma(
+          addExpLemma(
               lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
         }
         // Induction Lemma: 2 <= s_x /\ s_x = s_y /\ 0 <= t_y /\ t_x > t_y => exp(s_x, t_x) >= exp(s_y,t_y) * s_y
@@ -378,7 +567,7 @@ void ExpSolver::checkFullRefine() {
           Node ymulsy = nm->mkNode(Kind::MULT, m, m[0]);
           Node conclusion = nm->mkNode(Kind::LEQ, ymulsy, n);
           Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-          d_im.addPendingLemma(
+          addExpLemma(
               lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
         }
       }
@@ -417,8 +606,8 @@ void ExpSolver::checkFullRefine() {
 
     // Bounding as a live refinement family (--arith-exp-bounding=refine|both):
     // only the bnd lemmas this candidate model actually violates.
-    if (lsel.has("bounding")
-        && options().arith.expBoundingMode != options::ExpBoundingMode::INIT)
+    if (boundingMode == options::ExpBoundingMode::REFINE
+        || boundingMode == options::ExpBoundingMode::BOTH)
     {
       addBoundingRefine(n, model_s, model_t, expx);
     }
@@ -436,7 +625,7 @@ void ExpSolver::checkFullRefine() {
       Node vt_plus_v_squar = nm->mkNode(Kind::ADD, vt, v_squar);
       Node conclusion = nm->mkNode(Kind::GT, n, vt_plus_v_squar);
       Node lem = nm->mkNode(Kind::IMPLIES, assumption, conclusion);
-      d_im.addPendingLemma(lem,
+      addExpLemma(lem,
                            InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE,
                            nullptr,
                            true);
@@ -447,16 +636,19 @@ void ExpSolver::checkFullRefine() {
     // neg reciprocal:  t < 0  =>  exp(s, t) = 1 div exp(s, -t)
     // Only sound under integer div when t < 0 (both sides collapse to 0/1);
     // for t >= 0 it would force exp(s,t) = 1 div 0 = 0, so it is guarded here.
-    // Emitted only when --arith-exp-neg-recip=refine (default off; the 'init'
-    // mode emits it once per term from checkInitialRefine instead).
-    if (options().arith.expNegRecipMode == options::ExpNegRecipMode::REFINE)
+    // Emitted when --arith-exp-neg-recip=refine (default off; the 'init'
+    // mode emits it once per term from checkInitialRefine instead), or when
+    // the 'neg-recip' token is on --arith-exp-lemmas -- which 'exp-full'
+    // selects, and which is the same refine placement. The two are OR-ed.
+    if (options().arith.expNegRecipMode == options::ExpNegRecipMode::REFINE
+        || lsel.has("neg-recip"))
     {
       Node tlt0 = nm->mkNode(Kind::LT, t, d_zero);
       Node negT = nm->mkNode(Kind::NEG, t);
       Node mirror = nm->mkNode(Kind::EXP, s, negT);
       Node recip = nm->mkNode(Kind::INTS_DIVISION, d_one, mirror);
       Node negRecipLem = nm->mkNode(Kind::IMPLIES, tlt0, n.eqNode(recip));
-      d_im.addPendingLemma(negRecipLem,
+      addExpLemma(negRecipLem,
                            InferenceId::ARITH_NL_EXP_INIT_REFINE,
                            nullptr,
                            true);
@@ -467,7 +659,7 @@ void ExpSolver::checkFullRefine() {
     Trace("pow2-lemma") << "Pow2Solver::Lemma: " << lem << " ; VALUE_REFINE"
                         << std::endl;
     // send the value lemma
-    d_im.addPendingLemma(
+    addExpLemma(
         lem, InferenceId::ARITH_NL_POW2_VALUE_REFINE, nullptr, true);
     }
 }
@@ -603,13 +795,13 @@ void ExpSolver::checkMonotonicityRefine()
           Kind::IMPLIES, ant, nm->mkNode(Kind::LT, lo->n, hi->n));
       Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; MON_GENERAL"
                          << std::endl;
-      d_im.addPendingLemma(
+      addExpLemma(
           lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
     }
   }
 }
 
-void ExpSolver::checkFuseRefine()
+void ExpSolver::checkFuseRefine(bool byModel)
 {
   // Guarded same-base fusion:
   //
@@ -656,9 +848,57 @@ void ExpSolver::checkFuseRefine()
                    ve.getConst<Rational>().getNumerator()});
   }
 
+  // The 'fuse-model' variant: the fused exponent is matched by its candidate
+  // model value rather than syntactically, so the exponent equality becomes
+  // part of the antecedent. Only existing terms are related.
+  auto checkFuseByModel = [&](const std::vector<FusePoint>& ps,
+                              const std::vector<const FusePoint*>& fs) {
+    Integer tsum(0);
+    Integer vprod(1);
+    for (const FusePoint* f : fs)
+    {
+      tsum += f->t;
+      vprod *= f->v;
+    }
+    for (const FusePoint& p : ps)
+    {
+      if (p.s != fs[0]->s || p.t != tsum || vprod == p.v)
+      {
+        continue;
+      }
+      bool isFactor = false;
+      for (const FusePoint* f : fs)
+      {
+        isFactor = isFactor || p.n == f->n;
+      }
+      if (isFactor)
+      {
+        continue;
+      }
+      std::vector<Node> conj;
+      std::vector<Node> exps;
+      std::vector<Node> facs;
+      for (const FusePoint* f : fs)
+      {
+        conj.push_back(f->n[0].eqNode(p.n[0]));
+        conj.push_back(nm->mkNode(Kind::GEQ, f->n[1], d_zero));
+        exps.push_back(f->n[1]);
+        facs.push_back(f->n);
+      }
+      conj.push_back(p.n[1].eqNode(nm->mkNode(Kind::ADD, exps)));
+      Node prod = nm->mkNode(Kind::MULT, facs);
+      Node lem = nm->mkNode(
+          Kind::IMPLIES, nm->mkNode(Kind::AND, conj), prod.eqNode(p.n));
+      Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; FUSE_MODEL"
+                         << std::endl;
+      addExpLemma(lem, InferenceId::ARITH_NL_EXP_FUSE_REFINE, nullptr, true);
+    }
+  };
+
   for (size_t i = 0, size = pts.size(); i < size; i++)
   {
-    for (size_t j = i + 1; j < size; j++)
+    // 'fuse-model' also pairs a term with itself, exp(s,t)^2 = exp(s,2t).
+    for (size_t j = byModel ? i : i + 1; j < size; j++)
     {
       const FusePoint& a = pts[i];
       const FusePoint& b = pts[j];
@@ -694,6 +934,10 @@ void ExpSolver::checkFuseRefine()
       // again next round.
       if (!haveVal)
       {
+        if (byModel)
+        {
+          checkFuseByModel(pts, {&a, &b});
+        }
         continue;
       }
       // Only emit when the model VIOLATES the conclusion.
@@ -709,7 +953,167 @@ void ExpSolver::checkFuseRefine()
       Node lem = nm->mkNode(Kind::IMPLIES, ant, prod.eqNode(fused));
       Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; FUSE"
                          << std::endl;
-      d_im.addPendingLemma(
+      addExpLemma(
+          lem, InferenceId::ARITH_NL_EXP_FUSE_REFINE, nullptr, true);
+    }
+  }
+  // 'fuse-model' also tries three factors, which is what relates e.g.
+  // 2^(n*n) to 2^((n-1)*(n-1)) * 2^(n-1) * 2^n. The scan is cubic, so it is
+  // skipped on large term sets.
+  if (byModel && pts.size() <= 40)
+  {
+    for (size_t i = 0, size = pts.size(); i < size; i++)
+    {
+      for (size_t j = i; j < size; j++)
+      {
+        for (size_t k = j; k < size; k++)
+        {
+          const FusePoint& a = pts[i];
+          const FusePoint& b = pts[j];
+          const FusePoint& c = pts[k];
+          // A zero exponent only yields the pair lemma again.
+          if (a.s != b.s || a.s != c.s || a.t.sgn() <= 0 || b.t.sgn() <= 0
+              || c.t.sgn() <= 0)
+          {
+            continue;
+          }
+          checkFuseByModel(pts, {&a, &b, &c});
+        }
+      }
+    }
+  }
+}
+
+void ExpSolver::checkNegOneRefine(Node n,
+                                 const Integer& ms,
+                                 const Integer& mt)
+{
+  // neg-one:  s = -1 /\ t < 0  =>  exp(s,t) = exp(s,-t)
+  //
+  // Valid because (-1)^|t| depends only on the parity of t, and |t| and -t
+  // have the same parity -- so the two sides are the same element of {-1, 1}.
+  //
+  // This was an unconditional initial-refine axiom. It is a full-refinement
+  // lemma now, guarded by the candidate model satisfying its antecedent
+  // (Alg. 2 line 10), because it is one of the few axioms here that
+  // INTRODUCES a term: exp(s,-t) is a fresh EXP term, which then collects its
+  // own axiom batch and pairs with every other exp term in the pairwise
+  // scans. Emitting it once per term up front paid that cost on every problem
+  // containing any exponential; emitting it only for a model-violating term
+  // whose model actually has s = -1 and t < 0 pays it almost never.
+  if (ms != Integer(-1) || mt.sgn() >= 0)
+  {
+    return;
+  }
+  NodeManager* nm = nodeManager();
+  Node s = n[0];
+  Node t = n[1];
+  Node mirror = nm->mkNode(Kind::EXP, s, nm->mkNode(Kind::NEG, t));
+  Node lem = nm->mkNode(
+      Kind::IMPLIES,
+      nm->mkNode(Kind::AND,
+                 nm->mkNode(Kind::EQUAL, s, d_negone),
+                 nm->mkNode(Kind::LT, t, d_zero)),
+      n.eqNode(mirror));
+  Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; NEG_ONE"
+                     << std::endl;
+  addExpLemma(
+      lem, InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
+}
+
+void ExpSolver::checkFuseBaseRefine()
+{
+  // Same-exponent fusion:
+  //
+  //   exp(s,a) * exp(t,a) = exp(s*t, a)
+  //
+  // UNGUARDED, and that is not an oversight: unlike the same-base `fuse` and
+  // unlike `compose`, this identity survives negative exponents under `**`.
+  // For a >= 0 it is the ordinary power law. For a < 0 every factor lies in
+  // {-1, 0, 1}: exp(s,a) is 0 unless |s| = 1, and the product of the two sides
+  // agrees case by case -- e.g. s = -1, t = 2, a = -1 gives (-1)*0 = 0 on the
+  // left and exp(-2,-1) = 0 on the right. Checked exhaustively over
+  // [-9,9]^3 and on 400k random points with |s|,|t| <= 40, |a| <= 25.
+  //
+  // As with checkFuseRefine, only the non-term-introducing case is emitted:
+  // the fused term exp(s*t, a) must already be an EXP term of the problem or
+  // rewrite to a constant. That keeps the term graph fixed and stops the
+  // family from feeding itself new pairs each round.
+  NodeManager* nm = nodeManager();
+
+  struct Point
+  {
+    Node n;
+    Integer s;
+    Integer t;
+    Integer v;
+  };
+  std::vector<Point> pts;
+  pts.reserve(d_exps.size());
+  for (const Node& e : d_exps)
+  {
+    Node vs = d_model.computeConcreteModelValue(e[0]);
+    Node vt = d_model.computeConcreteModelValue(e[1]);
+    Node ve = d_model.computeAbstractModelValue(e);
+    if (!vs.isConst() || !vt.isConst() || !ve.isConst())
+    {
+      continue;
+    }
+    pts.push_back({e,
+                   vs.getConst<Rational>().getNumerator(),
+                   vt.getConst<Rational>().getNumerator(),
+                   ve.getConst<Rational>().getNumerator()});
+  }
+
+  for (size_t i = 0, size = pts.size(); i < size; i++)
+  {
+    for (size_t j = i + 1; j < size; j++)
+    {
+      const Point& a = pts[i];
+      const Point& b = pts[j];
+      // Pair up on a COMMON EXPONENT, where fuse pairs on a common base. The
+      // exponents need only agree in the candidate model; the emitted lemma
+      // states that agreement as its antecedent.
+      if (a.t != b.t)
+      {
+        continue;
+      }
+      Node prodBase = rewrite(nm->mkNode(Kind::MULT, a.n[0], b.n[0]));
+      Node fused = rewrite(nm->mkNode(Kind::EXP, prodBase, a.n[1]));
+      bool haveVal = false;
+      Integer fusedVal;
+      if (fused.isConst())
+      {
+        fusedVal = fused.getConst<Rational>().getNumerator();
+        haveVal = true;
+      }
+      else
+      {
+        for (const Point& p : pts)
+        {
+          if (p.n == fused)
+          {
+            fusedVal = p.v;
+            haveVal = true;
+            break;
+          }
+        }
+      }
+      if (!haveVal)
+      {
+        continue;
+      }
+      // Only emit when the model VIOLATES the conclusion (Alg. 2 line 10).
+      if (a.v * b.v == fusedVal)
+      {
+        continue;
+      }
+      Node lem = nm->mkNode(Kind::IMPLIES,
+                            a.n[1].eqNode(b.n[1]),
+                            nm->mkNode(Kind::MULT, a.n, b.n).eqNode(fused));
+      Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; FUSE_BASE"
+                         << std::endl;
+      addExpLemma(
           lem, InferenceId::ARITH_NL_EXP_FUSE_REFINE, nullptr, true);
     }
   }
@@ -717,14 +1121,53 @@ void ExpSolver::checkFuseRefine()
 
 void ExpSolver::checkComposeRefine(Node n)
 {
-  // Exponent-composition lemma (EIA-valid) for a model-violating nested term
-  // n (n is already known wrong here): exp(exp(x,y),z) = exp(x, y*z).
+  // Lemmas for a model-violating nested term n = exp(exp(x,y),z).
   if (n[0].getKind() != Kind::EXP) return;
   NodeManager* nm = nodeManager();
-  Node yz = nm->mkNode(Kind::MULT, n[0][1], n[1]);
-  Node lem = n.eqNode(nm->mkNode(Kind::EXP, n[0][0], yz));
-  d_im.addPendingLemma(
-      lem, InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
+  Node x = n[0][0];
+  Node y = n[0][1];
+  Node z = n[1];
+
+  // Composition, GUARDED:
+  //     y >= 0 /\ z >= 0  =>  exp(exp(x,y),z) = exp(x, y*z)
+  //
+  // The guard is not optional. The EIA reading (x^|y|)^|z| = x^|y*z| treats a
+  // negative exponent as its absolute value; cvc5's EXP is SMT-LIB `**`, where
+  // a negative exponent gives 1 div x^|t| instead. Unguarded the identity
+  // fails as soon as an exponent is negative -- for x = y = z = -6 the left
+  // side is exp(0,-6) = 0 while the right side is (-6)^36. On y, z >= 0 the
+  // two readings agree and the identity is the ordinary power law; checked
+  // exhaustively over [-9,9]^3. Note >= 0 rather than > 0: the y = 0 and
+  // z = 0 cases are valid too (both sides are 1, resp. exp(x,0) = 1).
+  Node yNonNeg = nm->mkNode(Kind::GEQ, y, d_zero);
+  Node zNonNeg = nm->mkNode(Kind::GEQ, z, d_zero);
+  Node yz = nm->mkNode(Kind::MULT, y, z);
+  addExpLemma(
+      nm->mkNode(Kind::IMPLIES,
+                 nm->mkNode(Kind::AND, yNonNeg, zNonNeg),
+                 n.eqNode(nm->mkNode(Kind::EXP, x, yz))),
+      InferenceId::ARITH_NL_EXP_INIT_REFINE,
+      nullptr,
+      true);
+
+  // The negative-inner-exponent case, which composition no longer covers:
+  //     y < 0 /\ (x > 1 \/ x < -1) /\ z != 0  =>  exp(exp(x,y),z) = 0
+  //
+  // y < 0 with |x| > 1 makes the inner power 0 (that is the always-on neg-abs
+  // axiom), and exp(0,z) is 0 for every z != 0. The z != 0 conjunct is needed:
+  // at z = 0 the whole term is 1, not 0. Checked exhaustively over [-9,9]^3.
+  Node yNeg = nm->mkNode(Kind::LT, y, d_zero);
+  Node absXGt1 = nm->mkNode(Kind::OR,
+                            nm->mkNode(Kind::GT, x, d_one),
+                            nm->mkNode(Kind::LT, x, d_negone));
+  Node zNZ = nm->mkNode(Kind::EQUAL, z, d_zero).notNode();
+  addExpLemma(
+      nm->mkNode(Kind::IMPLIES,
+                 nm->mkNode(Kind::AND, yNeg, absXGt1, zNZ),
+                 n.eqNode(d_zero)),
+      InferenceId::ARITH_NL_EXP_INIT_REFINE,
+      nullptr,
+      true);
 }
 
 void ExpSolver::checkSymmetryRefine(Node n, const Integer& model_t)
@@ -737,35 +1180,39 @@ void ExpSolver::checkSymmetryRefine(Node n, const Integer& model_t)
   Node s = n[0];
   Node t = n[1];
   Node expNegS = nm->mkNode(Kind::EXP, nm->mkNode(Kind::NEG, s), t);
-  Node expNegT = nm->mkNode(Kind::EXP, s, nm->mkNode(Kind::NEG, t));
   Node tEvenPred = nm->mkNode(
       Kind::EQUAL, nm->mkNode(Kind::INTS_MODULUS, t, d_two), d_zero);
   bool tEven = model_t.euclidianDivideRemainder(Integer(2)).isZero();
   if (tEven)
   {
     // sym1: divisible2(t) => exp(s,t) = exp(-s,t)
-    d_im.addPendingLemma(
+    addExpLemma(
         nm->mkNode(Kind::IMPLIES, tEvenPred, n.eqNode(expNegS)),
         InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
   }
   else
   {
     // sym2: ~divisible2(t) => exp(s,t) = -exp(-s,t)
-    d_im.addPendingLemma(
+    addExpLemma(
         nm->mkNode(Kind::IMPLIES,
                    tEvenPred.notNode(),
                    n.eqNode(nm->mkNode(Kind::NEG, expNegS))),
         InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
   }
-  // sym3: exp(s,t) = exp(s,-t) (unconditional; n is a model-violating term).
-  d_im.addPendingLemma(n.eqNode(expNegT),
-                       InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
+  // NOTE: sym3 -- exp(s,t) = exp(s,-t), emitted unconditionally for a
+  // model-violating term -- used to sit here behind an 'sym3' token. It is
+  // UNSOUND under this solver's semantics: cvc5's EXP is SMT-LIB `**`, where a
+  // negative exponent gives 1 div exp(s,-t) rather than the paper's s^|t|, so
+  // for s = 2, t = 1 the lemma claims 2 = exp(2,-1) = 0. It has been removed
+  // rather than left behind a flag. sym1 and sym2 above were checked against
+  // `**` including negative and zero exponents and are sound; the sound mirror
+  // relation is --arith-exp-neg-recip.
 }
 
 void ExpSolver::addBoundingLemmas(Node i, std::vector<Node>& conj)
 {
   // bnd2: t=1               => exp(s,t) = s
-  // bnd3: s=0 /\ t!=0      <=> exp(s,t) = 0
+  // bnd3: s=0 /\ t!=0       => exp(s,t) = 0   (forward only, see below)
   // bnd5: s>=2 /\ t>=2      => exp(s,t) >= s*s*(t-1)   (generalized; see below)
   // (bnd1 t=0=>exp=1 and bnd4 s=1=>exp=1 are already emitted unconditionally.)
   NodeManager* nm = nodeManager();
@@ -775,7 +1222,16 @@ void ExpSolver::addBoundingLemmas(Node i, std::vector<Node>& conj)
       Kind::IMPLIES, nm->mkNode(Kind::EQUAL, t, d_one), i.eqNode(s)));
   Node sZero = nm->mkNode(Kind::EQUAL, s, d_zero);
   Node tNZ = nm->mkNode(Kind::EQUAL, t, d_zero).notNode();
-  conj.push_back(nm->mkNode(Kind::EQUAL,
+  // bnd3, forward direction only. It was previously emitted here as the
+  // equivalence (s = 0 /\ t != 0) <=> exp(s,t) = 0, which is UNSOUND under
+  // cvc5's SMT-LIB `**`: the converse reads exp(s,t) = 0 => s = 0, but a
+  // negative exponent gives exp(s,t) = 1 div exp(s,-t) = 0 for every |s| > 1,
+  // so exp(2,-1) = 0 would derive 2 = 0. (It produced a wrong `unsat` on
+  // s >= 2 /\ t = 1 /\ exp(s,t) != exp(s,-t), which is satisfiable.) The
+  // forward direction is sound for every t, since (** 0 n) = 0 for n < 0 as
+  // well as n > 0. addBoundingRefine emits the converse separately under the
+  // guard t >= 0, which is where it is actually valid.
+  conj.push_back(nm->mkNode(Kind::IMPLIES,
                             nm->mkNode(Kind::AND, sZero, tNZ),
                             nm->mkNode(Kind::EQUAL, i, d_zero)));
   // bnd5, generalized. The paper's form is
@@ -829,7 +1285,7 @@ void ExpSolver::addBoundingRefine(Node i,
   // bnd2: t = 1 => exp(s,t) = s
   if (mt == one && mv != ms)
   {
-    d_im.addPendingLemma(nm->mkNode(Kind::IMPLIES,
+    addExpLemma(nm->mkNode(Kind::IMPLIES,
                                     nm->mkNode(Kind::EQUAL, t, d_one),
                                     i.eqNode(s)),
                          InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE,
@@ -843,7 +1299,7 @@ void ExpSolver::addBoundingRefine(Node i,
   // SMT-LIB `**`, since (** 0 n) = 0 for n < 0 as well as for n > 0.
   if (ms.sgn() == 0 && mt.sgn() != 0 && mv.sgn() != 0)
   {
-    d_im.addPendingLemma(
+    addExpLemma(
         nm->mkNode(Kind::IMPLIES, nm->mkNode(Kind::AND, sZero, tNZ), iZero),
         InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE,
         nullptr,
@@ -854,7 +1310,7 @@ void ExpSolver::addBoundingRefine(Node i,
   // the unguarded equivalence would derive s = 0 from exp(2,-1) = 0.
   if (mt.sgn() >= 0 && mv.sgn() == 0 && !(ms.sgn() == 0 && mt.sgn() != 0))
   {
-    d_im.addPendingLemma(
+    addExpLemma(
         nm->mkNode(Kind::IMPLIES,
                    nm->mkNode(
                        Kind::AND, nm->mkNode(Kind::GEQ, t, d_zero), iZero),
@@ -863,13 +1319,20 @@ void ExpSolver::addBoundingRefine(Node i,
         nullptr,
         true);
   }
-  // bnd5: s+t > 4 /\ s > 1 /\ t > 1 => exp(s,t) > s*t+1. This is the one whose
-  // conclusion is non-linear, and the reason the paper puts bounding BELOW
-  // monotonicity in the precedence order -- so holding it back until a model
-  // violates it is exactly the intent.
+  // bnd5, in the SAME generalized form addBoundingLemmas uses:
+  //     s >= 2 /\ t >= 2  =>  exp(s,t) >= s*s*(t-1)
+  // The paper's s+t > 4 /\ s > 1 /\ t > 1 => exp(s,t) > s*t+1 is never built
+  // as a node anywhere in this solver -- the generalized bound is strictly
+  // larger on the whole of the paper's region and additionally covers
+  // s = t = 2, which the paper's guard excludes.
+  //
+  // This is the one whose conclusion is non-linear, and the reason the paper
+  // puts bounding BELOW monotonicity in the precedence order -- so holding it
+  // back until a model violates it is exactly the intent. The firing test
+  // below is the model-side reading of the generalized conclusion.
   if (ms >= Integer(2) && mt >= Integer(2) && mv < ms * ms * (mt - one))
   {
-    d_im.addPendingLemma(
+    addExpLemma(
         nm->mkNode(Kind::IMPLIES,
                    nm->mkNode(Kind::AND,
                               nm->mkNode(Kind::GEQ, s, d_two),
@@ -889,7 +1352,8 @@ void ExpSolver::checkPrimeLemma(Node n,
                                 const Integer& model_s,
                                 const Integer& expx)
 {
-  // prime: divisible_d(exp(s,t)) <=> divisible_d(s) /\ t != 0, for the
+  // prime: divisible_d(s) /\ t != 0 => divisible_d(exp(s,t)) and
+  // t > 0 /\ divisible_d(exp(s,t)) => divisible_d(s), for the
   // smallest prime d dividing exactly one of |M(s)| and |M(exp(s,t))|. Only
   // relevant when the model's prime factorizations disagree (M(s),M(exp)>=2).
   if (model_s < Integer(2) || expx < Integer(2)) return;
@@ -928,10 +1392,17 @@ void ExpSolver::checkPrimeLemma(Node n,
   Node divS = nm->mkNode(
       Kind::EQUAL, nm->mkNode(Kind::INTS_MODULUS, s, dc), d_zero);
   Node tNZ = nm->mkNode(Kind::EQUAL, t, d_zero).notNode();
+  // The converse only holds for t > 0: for t < 0, s^t = 0 is divisible by d
+  // whatever s is.
   Node lem = nm->mkNode(
-      Kind::EQUAL, divExp, nm->mkNode(Kind::AND, divS, tNZ));
-  d_im.addPendingLemma(
+      Kind::IMPLIES, nm->mkNode(Kind::AND, divS, tNZ), divExp);
+  addExpLemma(
       lem, InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
+  Node tPos = nm->mkNode(Kind::GT, t, d_zero);
+  Node conv = nm->mkNode(
+      Kind::IMPLIES, nm->mkNode(Kind::AND, tPos, divExp), divS);
+  addExpLemma(
+      conv, InferenceId::ARITH_NL_EXP_INIT_REFINE, nullptr, true);
 }
 
 void ExpSolver::checkInductionLemma(Node n,
@@ -997,7 +1468,7 @@ void ExpSolver::checkInductionLemma(Node n,
       Kind::EQUAL, big, nm->mkNode(Kind::MULT, small, powNode));
   Node lem = nm->mkNode(
       Kind::IMPLIES, nm->mkNode(Kind::AND, sameBase, gap, tsGeq0), concl);
-  d_im.addPendingLemma(
+  addExpLemma(
       lem, InferenceId::ARITH_NL_EXP_INDUCTION_REFINE, nullptr, true);
 }
 
@@ -1088,7 +1559,7 @@ void ExpSolver::checkInterpolationLemma(Node n,
       Node lhs = nm->mkNode(Kind::MULT, nm->mkConstInt(Rational(scale)), n);
       Node lem = nm->mkNode(
           Kind::IMPLIES, guard, nm->mkNode(Kind::LEQ, lhs, rhs));
-      d_im.addPendingLemma(
+      addExpLemma(
           lem, InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE, nullptr, true);
     }
     d_interpPoints.emplace_back(c, d);
@@ -1108,7 +1579,7 @@ void ExpSolver::checkInterpolationLemma(Node n,
       Node lhs = nm->mkNode(Kind::MULT, nm->mkConstInt(Rational(scale)), n);
       Node lem = nm->mkNode(
           Kind::IMPLIES, guard, nm->mkNode(Kind::GEQ, lhs, rhs));
-      d_im.addPendingLemma(
+      addExpLemma(
           lem, InferenceId::ARITH_NL_EXP_BOUND_CASE_REFINE, nullptr, true);
     }
   }
@@ -1151,6 +1622,9 @@ bool ExpSolver::emitPhaseSplit(Node i)
   Node lem = guard.eqNode(nm->mkNode(Kind::AND, lb, ub));
   Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; PHASE_SPLIT(b = "
                      << d_phaseB << ")" << std::endl;
+  // Sent directly, NOT through addExpLemma: this is the definition of a
+  // fresh guard Boolean (search control), not a theorem about EXP, so
+  // --check-lemmas must neither record nor try to validate it.
   d_im.addPendingLemma(lem, InferenceId::ARITH_NL_EXP_PHASE_BOUND);
   // Steer the search into the bounded region, i.e. into the sat-phase. The
   // guard alone would do, but preferring the bound atoms as well means the

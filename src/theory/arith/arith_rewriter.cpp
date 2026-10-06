@@ -123,11 +123,13 @@ ArithRewriter::ArithRewriter(NodeManager* nm,
                              OperatorElim& oe,
                              bool expertEnabled,
                              const std::string& expRewriteMode,
-                             uint64_t expRewriteUnrollBound)
+                             uint64_t expRewriteUnrollBound,
+                             const std::string& expLemmasMode)
     : TheoryRewriter(nm),
       d_opElim(oe),
       d_expertEnabled(expertEnabled),
-      d_expRewriteMode(expRewriteMode),
+      d_expRewriteMode(expRewriteMode, ExpFeatureAxis::REWRITES),
+      d_expLemmasMode(expLemmasMode, ExpFeatureAxis::LEMMAS),
       d_expRewriteUnrollBound(expRewriteUnrollBound)
 {
   registerProofRewriteRule(ProofRewriteRule::ARITH_POW_ELIM,
@@ -799,65 +801,14 @@ RewriteResponse ArithRewriter::postRewriteMult(TNode t){
       }
     }
 
-    // Same-base EXP product fusion: gather EXP children that share a base,
-    // sum their exponents into a single EXP. Gated by --arith-exp-rewrites.
-    // Triggers REWRITE_AGAIN so the resulting ADD over exponents is
-    // normalized and any newly-constant exponent gets folded by
-    // postRewriteExp on the next pass.
+    // NOTE: same-base EXP product fusion -- exp(s,a)*exp(s,b) -> exp(s,a+b) --
+    // used to live here behind --arith-exp-rewrites=fuse. It is UNSOUND under
+    // cvc5's SMT-LIB `**` (exp(s,1)*exp(s,-1) = s * (1 div s) = 0 for s >= 2,
+    // while exp(s,0) = 1), which is also why Frohn & Giesl Sect. 4.1 name it
+    // as unsound, so it has been removed rather than left behind a flag. The
+    // sound counterpart is the guarded lemma --arith-exp-lemmas=fuse, which
+    // carries the antecedent t1 >= 0 /\ t2 >= 0 that makes the fusion valid.
     const ExpFeatureSet& erm = d_expRewriteMode;
-    if (erm.has("fuse"))
-    {
-      // base -> list of exponents (insertion-ordered via vector-of-pairs)
-      std::vector<std::pair<Node, std::vector<Node>>> baseGroups;
-      std::vector<Node> nonExpLeafs;
-      for (const Node& l : leafs)
-      {
-        if (l.getKind() == Kind::EXP)
-        {
-          auto it = std::find_if(
-              baseGroups.begin(), baseGroups.end(),
-              [&l](const std::pair<Node, std::vector<Node>>& p) {
-                return p.first == l[0];
-              });
-          if (it == baseGroups.end())
-          {
-            baseGroups.emplace_back(l[0], std::vector<Node>{l[1]});
-          }
-          else
-          {
-            it->second.push_back(l[1]);
-          }
-        }
-        else
-        {
-          nonExpLeafs.emplace_back(l);
-        }
-      }
-      bool fused = std::any_of(
-          baseGroups.begin(), baseGroups.end(),
-          [](const std::pair<Node, std::vector<Node>>& p) {
-            return p.second.size() >= 2;
-          });
-      if (fused)
-      {
-        std::vector<Node> newLeafs = std::move(nonExpLeafs);
-        for (auto& g : baseGroups)
-        {
-          if (g.second.size() == 1)
-          {
-            newLeafs.emplace_back(d_nm->mkNode(Kind::EXP, g.first, g.second[0]));
-          }
-          else
-          {
-            Node sumExp = d_nm->mkNode(Kind::ADD, g.second);
-            newLeafs.emplace_back(d_nm->mkNode(Kind::EXP, g.first, sumExp));
-          }
-        }
-        Node fusedRet = rewriter::mkMultTerm(d_nm, ran, std::move(newLeafs));
-        fusedRet = rewriter::maybeEnsureReal(t.getType(), fusedRet);
-        return RewriteResponse(REWRITE_AGAIN, fusedRet);
-      }
-    }
 
     // Same-exponent EXP product fusion: gather EXP children sharing an
     // exponent, multiply their bases into a single EXP. Gated by
@@ -1317,15 +1268,16 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
       if (t[i].getConst<Rational>().getNumerator() == maxsign.getConst<Rational>().getNumerator())
       {
         // ((_ piand k) 111...1 y) ---> (mod y 2^k)
-        if (i == 1) {
-          // Node ret = nm->mkNode(kind::INTS_MODULUS, t[2], twok);
-          Node ret = t[2];
-          return RewriteResponse(REWRITE_AGAIN, ret);
-        } else if (i == 2) {
-          // Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
-          Node ret = t[1];
-          return RewriteResponse(REWRITE_AGAIN, ret);
-        }
+        //
+        // The mod is not optional. piand masks both arguments to their low k
+        // bits -- which is what the all-constant branch below computes, via
+        // int_to_bv -- so dropping it is only correct for y already in
+        // [0, 2^k). Returning a bare y made the rewriter contradict itself on
+        // constants: piand(2,7,7) evaluated to 3 through the branch below
+        // while piand(2,3,7) evaluated to 7 through this one.
+        Node other = (i == 1) ? t[2] : t[1];
+        Node ret = nm->mkNode(Kind::INTS_MODULUS_TOTAL, other, twok);
+        return RewriteResponse(REWRITE_AGAIN, ret);
       }
     }
     // if constant, we eliminate
@@ -1348,9 +1300,13 @@ RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
     else if (t[1] == t[2])
     {
       // ((_ piand k) x x) ---> (mod x 2^k)
-      Node twok = nm->mkNode(Kind::POW2, t[0]);
-      // Node ret = nm->mkNode(kind::INTS_MODULUS, t[1], twok);
-      Node ret = t[1];
+      // As above, the mod carries the masking and cannot be dropped: x need
+      // not be below 2^k. Spell the modulus as (** 2 k) rather than POW2(k):
+      // the PBV translation and the PIAND lemmas both use EXP by default, and
+      // a POW2 term here would be a second, unrelated encoding of 2^k that the
+      // solver then has to connect back to the EXP one.
+      Node twok = nm->mkNode(Kind::EXP, nm->mkConstInt(Rational(2)), t[0]);
+      Node ret = nm->mkNode(Kind::INTS_MODULUS_TOTAL, t[1], twok);
       return RewriteResponse(REWRITE_AGAIN, ret);
     }
    return RewriteResponse(REWRITE_DONE, t);
@@ -1380,24 +1336,31 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
   // These drop EXP nodes from the term graph before the nl-ext solver
   // ever sees them.
   const ExpFeatureSet& erm = d_expRewriteMode;
-  bool doConst = erm.has("const") || erm.has("const-compose");
-  // Note: ALL deliberately excludes UNROLL — unrolling can blow up term size
-  // for moderate constants and must be opted into explicitly.
-  // 'unroll' is never implied by 'all': it can blow up term size, so it must
-  // always be named explicitly.
-  bool doUnroll = erm.has("unroll");
-  bool doCompose = erm.has("compose") || erm.has("const-compose");
+  // 'const' and 'unroll' are the two schemas that can also be named on
+  // --arith-exp-lemmas, and the two axes are OR-ed. Only these two: every other
+  // rewrite schema stays rewrite-axis only, and in particular 'fuse-base' names
+  // a lemma family on the lemma axis, so it must not turn the rewrite on.
+  // Note this makes the lemma-axis 'all' imply both, since 'all' there means
+  // all; on the rewrite axis 'unroll' stays explicit-only.
+  const ExpFeatureSet& elm = d_expLemmasMode;
+  // 'const-compose' predates the removal of the compose rewrite; it now
+  // selects the same schemas as plain 'const'.
+  bool doConst = erm.has("const") || erm.has("const-compose")
+                 || elm.has("const") || elm.has("const-compose");
+  // On the REWRITE axis 'unroll' is never implied by 'all': it can blow up term
+  // size, so it must be named explicitly there.
+  bool doUnroll = erm.has("unroll") || elm.has("unroll");
 
-  if (doCompose && t[0].getKind() == Kind::EXP)
-  {
-    // Exponent composition: EXP(EXP(x,y),z) -> EXP(x, y*z).
-    // EIA-valid since (x^|y|)^|z| = x^(|y|*|z|) = x^|y*z| for all integers.
-    // REWRITE_AGAIN so the new product exponent is normalized (and folded if
-    // it becomes constant).
-    Node yz = nm->mkNode(Kind::MULT, t[0][1], t[1]);
-    return RewriteResponse(REWRITE_AGAIN,
-                           nm->mkNode(Kind::EXP, t[0][0], yz));
-  }
+  // NOTE: exponent composition -- EXP(EXP(x,y),z) -> EXP(x, y*z) -- used to be
+  // applied here behind --arith-exp-rewrites=compose. It is UNSOUND as an
+  // unguarded rewrite under this solver's EXP semantics: the EIA argument
+  // (x^|y|)^|z| = x^|y*z| reads a negative exponent as its absolute value,
+  // while here a negative exponent gives 1 div x^|t|. For x = y = z = -6 the
+  // left side is EXP(0,-6) = 0 and the right side is (-6)^36, so the rewrite
+  // turned a satisfiable assertion into `unsat`. The identity needs
+  // y >= 0 /\ z >= 0, which a syntactic rewriter cannot discharge -- so it now
+  // lives only as the guarded lemma --arith-exp-lemmas=compose, which keeps
+  // the term and states its antecedent. See ExpSolver::checkComposeRefine.
 
   if (doConst)
   {
@@ -1422,31 +1385,40 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
   {
     // SwInE Sect. 4.1, rewrite rule 1, under this solver's EXP semantics:
     //
-    //   EXP(s, c)  ->  s * ... * s            (|c| copies)   for c >= 2
-    //   EXP(s, c)  ->  1 div (s * ... * s)    (|c| copies)   for c <= -2
-    //   EXP(s, -1) ->  1 div s
+    //   EXP(s, c)  ->  s * ... * s            (c copies)   for 2 <= c <= B
     //
-    // The paper's EIA reads exp(x,c) as x^|c|, so it unrolls negative constant
-    // exponents to the same product. Here exp(x,c) is 1 div x^|c| for c < 0,
-    // so the negative case unrolls to the reciprocal of that product instead.
-    // c in {0, 1} is left to the 'const' schema above.
+    // POSITIVE constant exponents ONLY. c in {0, 1} is left to the 'const'
+    // schema above, and negative constants are deliberately not unrolled.
+    //
+    // The paper's EIA reads exp(x,c) as x^|c| and so unrolls a negative
+    // constant to the same product. Here exp(x,c) is 1 div x^|c| for c < 0,
+    // which would have to be emitted as a division -- and that is not safe as
+    // a rewrite, because unrolling DELETES the EXP node and with it every
+    // axiom that constrains the term:
+    //
+    //   * with the partial INTS_DIVISION, `1 div s` is unconstrained at s = 0
+    //     while exp(0,c) is 0, so `s = 0 /\ exp(s,-1) = -1` came back `sat`
+    //     though it is unsat;
+    //   * with INTS_DIVISION_TOTAL that particular case is pinned, but one
+    //     side of a goal then lives as a division term while the other stays
+    //     an EXP term, and the solver relates the two only in some cases --
+    //     `s >= 0 /\ t < 0 /\ exp(s,t) != exp(s,-1)` still came back `sat`,
+    //     with a model assigning both terms 0.
+    //
+    // Leaving the negative case alone keeps the EXP node, so neg-abs
+    // (|s| > 1 => 0), bnd4 (s = 1 => 1), neg-one (s = -1) and bnd3 (s = 0)
+    // continue to define it -- together they already cover every case of a
+    // negative exponent. --arith-exp-neg-recip is the flag for relating
+    // exp(s,t) to 1 div exp(s,-t) as a LEMMA, which keeps the term.
     const Rational& r = t[1].getConst<Rational>();
     if (r.isIntegral())
     {
       Integer ci = r.getNumerator();
-      Integer mag = ci.abs();
-      if (mag >= Integer(1) && mag <= Integer(d_expRewriteUnrollBound)
-          && !(ci.sgn() > 0 && mag == Integer(1)))
+      if (ci >= Integer(2) && ci <= Integer(d_expRewriteUnrollBound))
       {
-        uint64_t c = mag.toUnsignedInt();
-        Node prod = c == 1 ? Node(t[0])
-                           : nm->mkNode(Kind::MULT, std::vector<Node>(c, t[0]));
-        if (ci.sgn() < 0)
-        {
-          prod = nm->mkNode(
-              Kind::INTS_DIVISION, nm->mkConstInt(Rational(1)), prod);
-        }
-        return RewriteResponse(REWRITE_AGAIN, prod);
+        uint64_t c = ci.toUnsignedInt();
+        return RewriteResponse(
+            REWRITE_AGAIN, nm->mkNode(Kind::MULT, std::vector<Node>(c, t[0])));
       }
     }
   }

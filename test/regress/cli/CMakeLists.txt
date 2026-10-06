@@ -1115,6 +1115,21 @@ set(regress_0_tests
   regress0/nl/dd.sin-cos-346-b-chunk-0210.smt2
   regress0/nl/dd.sin-cos-346-b-chunk-0210_unsat.smt2
   regress0/nl/iand-no-init.smt2
+  regress0/nl/icp-int-coeff-denominator.smt2
+  regress0/nl/icp-nia-divzero-origin.smt2
+  regress0/nl/icp-nia-vardiv-origin.smt2
+  regress0/nl/icp-opaque-term-origin.smt2
+  regress0/nl/pow2-norm-div-fuse.smt2
+  regress0/nl/pow2-norm-shl-past.smt2
+  regress0/pbv/bv-as-int-pbv-direct.smt2
+  regress0/pbv/bv-as-int-pbv-pipeline-model.smt2
+  regress0/pbv/bv-as-int-pbv-pipeline-rw.smt2
+  regress0/pbv/bv-as-int-pbv-pipeline-uf.smt2
+  regress0/pbv/pbv-mw-mask-facts.smt2
+  regress0/pbv/pbv-mw-shift-bitwise-sat.smt2
+  regress0/pbv/pbv-mw-shift-bitwise.smt2
+  regress0/pbv/pbv-mw-sign-idioms.smt2
+  regress0/pbv/pbv-div-lemmas.smt2
   regress0/nl/issue10145-ir-pow.smt2
   regress0/nl/issue10140-nl-tc.smt2
   regress0/nl/issue11901-pow-rewrite-type.smt2
@@ -1225,6 +1240,7 @@ set(regress_0_tests
   regress0/nl/tpp-fail-pf-012921.smt2
   regress0/nl/very-easy-sat.smt2
   regress0/nl/very-simple-unsat.smt2
+  regress0/nl/witness-enum-small-width.smt2
   regress0/opt-abd-no-use.smt2
   regress0/options/ast-and-sexpr.smt2
   regress0/options/didyoumean.smt2

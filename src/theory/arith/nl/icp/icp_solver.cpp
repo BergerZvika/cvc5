@@ -20,6 +20,7 @@
 #include "base/check.h"
 #include "base/output.h"
 #include "expr/node_algorithm.h"
+#include "options/arith_options.h"
 #include "theory/arith/arith_msum.h"
 #include "theory/arith/inference_manager.h"
 #include "theory/arith/nl/poly_conversion.h"
@@ -70,11 +71,27 @@ ICPSolver::ICPSolver(Env& env, InferenceManager& im)
 {
 }
 
-std::vector<Node> ICPSolver::collectVariables(const Node& n) const
+std::vector<Node> ICPSolver::collectVariables(const Node& n,
+                                              const poly::Polynomial& p)
 {
+  std::vector<Node> res;
+  if (options().arith.nlICPFix)
+  {
+    // Collect the nodes behind the poly variables of p. This includes the
+    // non-arithmetic leaf terms (e.g. applications of uninterpreted functions
+    // or transcendental functions) that are treated as variables by the
+    // polynomial conversion; their bounds are used during evaluation and
+    // must hence appear in the origins.
+    poly::VariableCollector vc;
+    vc(p);
+    for (const auto& v : vc.get_variables())
+    {
+      res.emplace_back(d_mapper(v));
+    }
+    return res;
+  }
   std::unordered_set<Node> tmp;
   expr::getVariables(n, tmp);
-  std::vector<Node> res;
   for (const auto& t : tmp)
   {
     res.emplace_back(t);
@@ -127,12 +144,16 @@ std::vector<Candidate> ICPSolver::constructCandidates(const Node& n)
       }
       poly::Rational rhsmult;
       poly::Polynomial rhs = as_poly_polynomial(val, d_mapper, rhsmult);
-      // only correct up to a constant (denominator is thrown away!)
+      // val = rhs / rhsmult. If v has a coefficient veq_c (integer case), the
+      // constraint is veq_c * v ~ val, hence v ~ rhs / (rhsmult * veq_c).
+      // Without --nl-icp-fix the denominator is thrown away (unsound).
       if (!veq_c.isNull())
       {
-        rhsmult = poly_utils::toRational(veq_c.getConst<Rational>());
+        poly::Rational c = poly_utils::toRational(veq_c.getConst<Rational>());
+        rhsmult = options().arith.nlICPFix ? rhsmult * c : c;
       }
-      Candidate res{lhs, rel, rhs, poly::inverse(rhsmult), n, collectVariables(val)};
+      Candidate res{
+          lhs, rel, rhs, poly::inverse(rhsmult), n, collectVariables(val, rhs)};
       Trace("nl-icp") << "\tAdded " << res << " from " << n << std::endl;
       result.emplace_back(res);
     }
@@ -154,9 +175,11 @@ std::vector<Candidate> ICPSolver::constructCandidates(const Node& n)
       poly::Polynomial rhs = as_poly_polynomial(val, d_mapper, rhsmult);
       if (!veq_c.isNull())
       {
-        rhsmult = poly_utils::toRational(veq_c.getConst<Rational>());
+        poly::Rational c = poly_utils::toRational(veq_c.getConst<Rational>());
+        rhsmult = options().arith.nlICPFix ? rhsmult * c : c;
       }
-      Candidate res{lhs, rel, rhs, poly::inverse(rhsmult), n, collectVariables(val)};
+      Candidate res{
+          lhs, rel, rhs, poly::inverse(rhsmult), n, collectVariables(val, rhs)};
       Trace("nl-icp") << "\tAdded " << res << " from " << n << std::endl;
       result.emplace_back(res);
     }

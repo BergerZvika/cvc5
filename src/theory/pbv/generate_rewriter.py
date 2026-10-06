@@ -56,6 +56,12 @@ REWRITES_FILE = SCRIPT_DIR / "rewrites"
 #   - Literal constant patterns (CInt)
 ###############################################################################
 
+# Kinds that take two OR MORE operands (kinds.toml: children = "2:").
+NARY_KINDS = {
+    "PBV_AND", "PBV_OR", "PBV_XOR", "PBV_ADD", "PBV_MULT", "PBV_CONCAT",
+}
+
+
 def walk_lhs(pattern, accessor: str, var_ctx: dict, guards: list):
     if isinstance(pattern, Var):
         if pattern in var_ctx:
@@ -80,6 +86,12 @@ def walk_lhs(pattern, accessor: str, var_ctx: dict, guards: list):
     if isinstance(pattern, App):
         if accessor != "node":
             guards.append(f"({accessor}.getKind() == Kind::{pattern.op.kind})")
+        # An n-ary operator matches only with the pattern's exact arity:
+        # without this, `(pbvadd x 0)` would match `(pbvadd x 0 z)` through
+        # node[0]/node[1] and the rewrite would silently drop z.
+        if pattern.op.kind in NARY_KINDS:
+            guards.append(
+                f"({accessor}.getNumChildren() == {len(pattern.children)})")
         for idx, child in enumerate(pattern.children):
             walk_lhs(child, f"{accessor}[{idx}]", var_ctx, guards)
         return
@@ -748,8 +760,9 @@ class TheoryPbvRewriter : public TheoryRewriter {
                     bool rwShiftZext = false)
       : TheoryRewriter(nm),
         d_rwMerge(rwMw == options::PbvRwMwMode::BASE
-                  || rwMw == options::PbvRwMwMode::ALL),
+                  || rwMw == options::PbvRwMwMode::BASE_CAV26),
         d_rwCav26(rwMw == options::PbvRwMwMode::CAV26
+                  || rwMw == options::PbvRwMwMode::BASE_CAV26
                   || rwMw == options::PbvRwMwMode::ALL),
         d_rwAc(rwAc),
         d_rwNnf(rwNnf),

@@ -104,9 +104,8 @@ class ExpModPow : public PreprocessingPass
   std::unordered_map<Node, Node> d_cache;
   /** Memo for nonNeg. */
   std::unordered_map<Node, bool> d_nonNeg;
-  /** Number of applications of each rule, for the trace. */
+  /** Number of applications of rule 1, for the trace. */
   uint64_t d_numPow = 0;
-  uint64_t d_numMult = 0;
   /** How many of those had their exponent order entailed rather than split. */
   uint64_t d_numDecided = 0;
 };

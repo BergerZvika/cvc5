@@ -115,8 +115,12 @@ class ICPSolver : protected EnvObj
   /** The budget increment for new candidates and strong contractions */
   static constexpr std::int64_t d_budgetIncrement = 10;
 
-  /** Collect all variables from a node */
-  std::vector<Node> collectVariables(const Node& n) const;
+  /**
+   * Collect the origin variables of a candidate right-hand side. With
+   * --nl-icp-fix these are the nodes of all poly variables of p (including
+   * non-variable leaf terms); otherwise only the variables of n.
+   */
+  std::vector<Node> collectVariables(const Node& n, const poly::Polynomial& p);
   /** Construct all possible candidates from a given theory atom */
   std::vector<Candidate> constructCandidates(const Node& n);
   /** Add the given node as candidate */

@@ -236,10 +236,6 @@ Node Pow2ModReducer::rebuild(TNode n, const std::vector<Node>& kids) const
 void Pow2ModReducer::harvest(const std::vector<Node>& assertions)
 {
   d_facts.harvest(assertions);
-  if (options().smt.pbvModVarWidths)
-  {
-    harvestVarWidths(assertions);
-  }
 }
 
 Node Pow2ModReducer::reduce(Node n) { return reduceRec(n); }
@@ -386,30 +382,6 @@ bool Pow2ModReducer::boundedBy(TNode x, TNode k)
       bump(10);
       return true;
     }
-    // Group A' (--pbv-mod-var-widths): the sum bound WITHOUT going through max.
-    //
-    // widthOf(a+b) is 1 + max(wa,wb), and `max` is not a term, so widthOf()
-    // must compare wa and wb through the fact store and gives up when neither
-    // direction is entailed. That is the common case: a goal states p < u and
-    // r < u and says nothing relating p to r, so the bound is unavailable even
-    // though EACH operand is strictly narrower than k.
-    //
-    // parabit's add_full_prec asks exactly that instead -- `(< q p)` and
-    // `(< r p)` separately -- so it never needs max. Sum of two values each
-    // below 2^(k-1) is below 2^k, so the enclosing mod is the identity.
-    // Applied n-ary via a halving argument is NOT valid, so this fires only on
-    // the binary case; a wider ADD is left alone.
-    if (options().smt.pbvModVarWidths && x.getKind() == Kind::ADD
-        && x.getNumChildren() == 2)
-    {
-      Node wa = widthOf(x[0]);
-      Node wb = widthOf(x[1]);
-      if (!wa.isNull() && !wb.isNull() && d_facts.lt(wa, k) && d_facts.lt(wb, k))
-      {
-        bump(14);
-        return true;
-      }
-    }
   }
   return false;
 }
@@ -417,67 +389,6 @@ bool Pow2ModReducer::boundedBy(TNode x, TNode k)
 /* == group A: width bounds ================================================= */
 
 
-void Pow2ModReducer::harvestVarWidths(const std::vector<Node>& assertions)
-{
-  // The translation states a symbol's width as a RANGE atom rather than in the
-  // term -- addRangeConstraints emits `0 <= x` and `x < 2^k` -- so widthOf()
-  // sees nothing on a bare symbol. Recover k for x, which is the information
-  // parabit keeps syntactically in `(bw k a)`.
-  //
-  // Two shapes are matched: the constraint as built, `(< x 2^k)`, and the form
-  // it takes after arithmetic normalization, `(not (>= (+ x (* -1 2^k)) 0))`.
-  // Conjunctions are descended, since the range pair arrives as one AND.
-  // Anything else is skipped: a missing entry only leaves widthOf() answering
-  // null exactly as before, so this costs completeness and never soundness.
-  std::vector<TNode> work(assertions.begin(), assertions.end());
-  std::unordered_set<TNode> seen;
-  auto record = [&](TNode var, TNode e) {
-    if (!var.isVar() || !var.getType().isInteger()) return;
-    auto it = d_varWidth.find(var);
-    if (it == d_varWidth.end() || d_facts.leq(e, it->second))
-    {
-      d_varWidth[var] = e;
-    }
-  };
-  while (!work.empty())
-  {
-    TNode a = work.back();
-    work.pop_back();
-    if (!seen.insert(a).second) continue;
-    if (a.getKind() == Kind::AND)
-    {
-      for (const Node& c : a) work.push_back(c);
-      continue;
-    }
-    Node e;
-    // `(< x 2^k)` as addRangeConstraints builds it.
-    if (a.getKind() == Kind::LT && a.getNumChildren() == 2 && isPow2(a[1], e))
-    {
-      record(a[0], e);
-      continue;
-    }
-    // `(not (>= (+ x (* -1 2^k)) 0))` after normalization.
-    if (a.getKind() != Kind::NOT || a.getNumChildren() != 1) continue;
-    TNode atom = a[0];
-    if (atom.getKind() != Kind::GEQ || atom.getNumChildren() != 2) continue;
-    if (!atom[1].isConst() || atom[1].getConst<Rational>().sgn() != 0) continue;
-    TNode sum = atom[0];
-    if (sum.getKind() != Kind::ADD || sum.getNumChildren() != 2) continue;
-    for (size_t i = 0; i < 2; ++i)
-    {
-      TNode negPow = sum[i];
-      if (negPow.getKind() != Kind::MULT || negPow.getNumChildren() != 2) continue;
-      if (!negPow[0].isConst()
-          || negPow[0].getConst<Rational>() != Rational(-1))
-      {
-        continue;
-      }
-      if (!isPow2(negPow[1], e)) continue;
-      record(sum[1 - i], e);
-      break;
-    }
-  }
-}
 
 Node Pow2ModReducer::widthOf(TNode x)
 {
@@ -494,17 +405,6 @@ Node Pow2ModReducer::widthOf(TNode x)
 Node Pow2ModReducer::widthOfCompute(TNode x)
 {
   NodeManager* nm = nodeManager();
-
-  // A bare symbol carries no width in the term; the translation put it in a
-  // RANGE atom instead (--pbv-mod-var-widths).
-  if (x.isVar())
-  {
-    auto vit = d_varWidth.find(x);
-    if (vit != d_varWidth.end())
-    {
-      return vit->second;
-    }
-  }
 
   // x = y mod 2^m  ->  m.  Requires m >= 0, else 2^m is not an integer and the
   // Euclidean remainder says nothing.

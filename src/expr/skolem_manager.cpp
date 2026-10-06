@@ -606,14 +606,18 @@ TypeNode SkolemManager::getTypeFor(SkolemId id,
       std::vector<TypeNode> bvDomain = tn.getArgTypes();
       std::vector<TypeNode> intDomain;
 
-      // if the original range is a bit-vector sort,
-      // the new range should be an integer sort.
+      // if the original range is a bit-vector sort (or a parametric
+      // bit-vector sort, which the PBV int-blaster translates to Int the
+      // same way), the new range should be an integer sort.
       // Otherwise, we keep the original range.
       // Similarly for the domain sorts.
-      TypeNode intRange = bvRange.isBitVector() ? d_nm->integerType() : bvRange;
+      TypeNode intRange = (bvRange.isBitVector() || bvRange.isPbv())
+                              ? d_nm->integerType()
+                              : bvRange;
       for (const TypeNode& d : bvDomain)
       {
-        intDomain.push_back(d.isBitVector() ? d_nm->integerType() : d);
+        intDomain.push_back(
+            (d.isBitVector() || d.isPbv()) ? d_nm->integerType() : d);
       }
       return d_nm->mkFunctionType(intDomain, intRange);
     }

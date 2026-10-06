@@ -139,6 +139,13 @@ class CVC5_EXPORT Cmd
    */
   virtual void printResult(cvc5::Solver* solver, std::ostream& out) const;
   /**
+   * Hook run by invokeAndPrintResult AFTER the result was printed. A command
+   * that has deferred work whose output must follow its answer (the
+   * --check-lemmas verdict of check-sat) does it here; an exception raised
+   * here turns into a command failure, exactly as one raised by invoke.
+   */
+  virtual void postPrintResult(cvc5::Solver* solver) {}
+  /**
    * Reset the given solver in-place (keep the object at the same memory
    * location).
    */
@@ -149,6 +156,8 @@ class CVC5_EXPORT Cmd
   // which is currently necessary for e.g. printing commands.
   /** Helper to convert a Term to an internal internal::Node */
   static internal::Node termToNode(const cvc5::Term& term);
+  /** Access the internal solver engine (Cmd is a friend of Solver). */
+  static internal::SolverEngine* solverEngineOf(cvc5::Solver* solver);
   /** Helper to convert a vector of Terms to internal Nodes. */
   static std::vector<internal::Node> termVectorToNodes(
       const std::vector<cvc5::Term>& terms);
@@ -449,6 +458,7 @@ class CVC5_EXPORT CheckSatCommand : public Cmd
   cvc5::Result getResult() const;
   void invoke(cvc5::Solver* solver, parser::SymManager* sm) override;
   void printResult(cvc5::Solver* solver, std::ostream& out) const override;
+  void postPrintResult(cvc5::Solver* solver) override;
   std::string getCommandName() const override;
   void toStream(std::ostream& out) const override;
 
@@ -471,6 +481,7 @@ class CVC5_EXPORT CheckSatAssumingCommand : public Cmd
   cvc5::Result getResult() const;
   void invoke(cvc5::Solver* solver, parser::SymManager* sm) override;
   void printResult(cvc5::Solver* solver, std::ostream& out) const override;
+  void postPrintResult(cvc5::Solver* solver) override;
   std::string getCommandName() const override;
   void toStream(std::ostream& out) const override;
 

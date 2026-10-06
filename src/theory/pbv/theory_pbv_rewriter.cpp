@@ -112,7 +112,7 @@ RewriteResponse TheoryPbvRewriter::postRewrite(TNode node)
   {
     // Rule: pbv-add-zero
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_add_zero = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_add_zero);
@@ -120,7 +120,7 @@ RewriteResponse TheoryPbvRewriter::postRewrite(TNode node)
 
     // Rule: pbv-c26-not-plus-one
     if (
-d_rwCav26        && (node[0].getKind() == Kind::PBV_NOT)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[0].getKind() == Kind::PBV_NOT)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
     {
       Node rhs_pbv_c26_not_plus_one = nm->mkNode(Kind::PBV_NEG, { node[0][0] });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_not_plus_one);
@@ -133,7 +133,7 @@ d_rwCav26        && (node[0].getKind() == Kind::PBV_NOT)        && (node[1].getK
   {
     // Rule: pbv-and-zero
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_and_zero = nm->mkNode(Kind::INT_TO_PBV, { node[1][0], nm->mkConstInt(Rational(0)) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_and_zero);
@@ -141,7 +141,7 @@ d_rwCav26        && (node[0].getKind() == Kind::PBV_NOT)        && (node[1].getK
 
     // Rule: pbv-reverse-extract-and
     if (
-(node[0].getKind() == Kind::PBV_EXTRACT)        && (node[1].getKind() == Kind::PBV_EXTRACT)        && (node[0][1] == node[1][1])        && (node[0][2] == node[1][2]))
+(node.getNumChildren() == 2)        && (node[0].getKind() == Kind::PBV_EXTRACT)        && (node[1].getKind() == Kind::PBV_EXTRACT)        && (node[0][1] == node[1][1])        && (node[0][2] == node[1][2]))
     {
       Node rhs_pbv_reverse_extract_and = nm->mkNode(Kind::PBV_EXTRACT, { nm->mkNode(Kind::PBV_AND, { node[0][0], node[1][0] }), node[0][1], node[0][2] });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_reverse_extract_and);
@@ -149,7 +149,7 @@ d_rwCav26        && (node[0].getKind() == Kind::PBV_NOT)        && (node[1].getK
 
     // Rule: pbv-c26-and-allones
     if (
-d_rwCav26        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_c26_and_allones = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_and_allones);
@@ -157,7 +157,7 @@ d_rwCav26        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].g
 
     // Rule: pbv-c26-and-self
     if (
-d_rwCav26        && (node[0] == node[1]))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[0] == node[1]))
     {
       Node rhs_pbv_c26_and_self = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_and_self);
@@ -165,7 +165,7 @@ d_rwCav26        && (node[0] == node[1]))
 
     // Rule: pbv-c26-and-not-self
     if (
-d_rwCav26        && (node[1].getKind() == Kind::PBV_NOT)        && (node[0] == node[1][0]))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[1].getKind() == Kind::PBV_NOT)        && (node[0] == node[1][0]))
     {
       Node rhs_pbv_c26_and_not_self = nm->mkNode(Kind::INT_TO_PBV, { nm->mkNode(Kind::PBV_SIZE, { node[0] }), nm->mkConstInt(Rational(0)) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_and_not_self);
@@ -173,7 +173,7 @@ d_rwCav26        && (node[1].getKind() == Kind::PBV_NOT)        && (node[0] == n
 
     // Rule: pbv-c26-and-one
     if (
-d_rwCav26        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
     {
       Node rhs_pbv_c26_and_one = nm->mkNode(Kind::PBV_ZERO_EXTEND, { nm->mkNode(Kind::SUB, { node[1][0], nm->mkConstInt(Rational(1)) }), nm->mkNode(Kind::PBV_EXTRACT, { node[0], nm->mkConstInt(Rational(0)), nm->mkConstInt(Rational(0)) }) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_and_one);
@@ -207,7 +207,7 @@ d_rwCav26        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1
   {
     // Rule: pbv-concat-extract-merge
     if (
-(node[0].getKind() == Kind::PBV_EXTRACT)        && (node[1].getKind() == Kind::PBV_EXTRACT)        && (node[0][0] == node[1][0])        && node[0][2] == nm->mkNode(Kind::ADD, { node[1][1], nm->mkConstInt(Rational(1)) }))
+(node.getNumChildren() == 2)        && (node[0].getKind() == Kind::PBV_EXTRACT)        && (node[1].getKind() == Kind::PBV_EXTRACT)        && (node[0][0] == node[1][0])        && node[0][2] == nm->mkNode(Kind::ADD, { node[1][1], nm->mkConstInt(Rational(1)) }))
     {
       Node rhs_pbv_concat_extract_merge = nm->mkNode(Kind::PBV_EXTRACT, { node[0][0], node[0][1], node[1][2] });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_concat_extract_merge);
@@ -278,7 +278,7 @@ d_rwMerge        && (node[0].getKind() == Kind::PBV_LSHR))
   {
     // Rule: pbv-mul-one
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(1)))
     {
       Node rhs_pbv_mul_one = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_mul_one);
@@ -286,7 +286,7 @@ d_rwMerge        && (node[0].getKind() == Kind::PBV_LSHR))
 
     // Rule: pbv-mul-zero
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_mul_zero = nm->mkNode(Kind::INT_TO_PBV, { node[1][0], nm->mkConstInt(Rational(0)) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_mul_zero);
@@ -294,7 +294,7 @@ d_rwMerge        && (node[0].getKind() == Kind::PBV_LSHR))
 
     // Rule: pbv-mul-two
     if (
-d_rwMerge        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(2)))
+d_rwMerge        && (node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(2)))
     {
       Node rhs_pbv_mul_two = nm->mkNode(Kind::PBV_ADD, { node[0], node[0] });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_mul_two);
@@ -341,7 +341,7 @@ d_rwMerge        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1
   {
     // Rule: pbv-or-zero
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_or_zero = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_or_zero);
@@ -349,7 +349,7 @@ d_rwMerge        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1
 
     // Rule: pbv-or-one
     if (
-(node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_or_one = nm->mkNode(Kind::PBV_NOT, { nm->mkNode(Kind::INT_TO_PBV, { node[1][0][0], nm->mkConstInt(Rational(0)) }) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_or_one);
@@ -357,7 +357,7 @@ d_rwMerge        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1
 
     // Rule: pbv-bitwise-idemp-2
     if (
-(node[0] == node[1]))
+(node.getNumChildren() == 2)        && (node[0] == node[1]))
     {
       Node rhs_pbv_bitwise_idemp_2 = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_bitwise_idemp_2);
@@ -619,7 +619,7 @@ d_rwMerge        && (node[1].getKind() == Kind::PBV_SIGN_EXTEND))
   {
     // Rule: pbv-xor-zero
     if (
-(node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
+(node.getNumChildren() == 2)        && (node[1].getKind() == Kind::INT_TO_PBV)        && (node[1][1].isConst() && node[1][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_xor_zero = node[0];
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_xor_zero);
@@ -627,7 +627,7 @@ d_rwMerge        && (node[1].getKind() == Kind::PBV_SIGN_EXTEND))
 
     // Rule: pbv-xor-duplicate
     if (
-(node[0] == node[1]))
+(node.getNumChildren() == 2)        && (node[0] == node[1]))
     {
       Node rhs_pbv_xor_duplicate = nm->mkNode(Kind::INT_TO_PBV, { nm->mkNode(Kind::PBV_SIZE, { node[0] }), nm->mkConstInt(Rational(0)) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_xor_duplicate);
@@ -635,7 +635,7 @@ d_rwMerge        && (node[1].getKind() == Kind::PBV_SIGN_EXTEND))
 
     // Rule: pbv-xor-not
     if (
-(node[0].getKind() == Kind::PBV_NOT))
+(node.getNumChildren() == 2)        && (node[0].getKind() == Kind::PBV_NOT))
     {
       Node rhs_pbv_xor_not = nm->mkNode(Kind::PBV_NOT, { nm->mkNode(Kind::PBV_XOR, { node[0][0], node[1] }) });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_xor_not);
@@ -643,7 +643,7 @@ d_rwMerge        && (node[1].getKind() == Kind::PBV_SIGN_EXTEND))
 
     // Rule: pbv-c26-xor-allones
     if (
-d_rwCav26        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
+d_rwCav26        && (node.getNumChildren() == 2)        && (node[1].getKind() == Kind::PBV_NOT)        && (node[1][0].getKind() == Kind::INT_TO_PBV)        && (node[1][0][1].isConst() && node[1][0][1].getConst<Rational>() == Rational(0)))
     {
       Node rhs_pbv_c26_xor_allones = nm->mkNode(Kind::PBV_NOT, { node[0] });
       return RewriteResponse(REWRITE_AGAIN_FULL, rhs_pbv_c26_xor_allones);

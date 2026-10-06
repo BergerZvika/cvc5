@@ -15,6 +15,8 @@
 
 #include "smt/process_assertions.h"
 
+#include "theory/arith/exp_feature_set.h"
+
 #include <utility>
 
 #include "options/arith_options.h"
@@ -138,6 +140,17 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
       << "ProcessAssertions::processAssertions() : post-definition-expansion"
       << endl;
 
+  // Pin the value of every (exp -1 e), immediately after definition expansion
+  // so that every later pass sees the facts. Placement was measured on the 109
+  // hardest LoAT instances.
+  if (options().arith.expNegOneParity
+      || theory::arith::ExpFeatureSet(options().arith.expLemmasMode,
+                                      theory::arith::ExpFeatureAxis::LEMMAS)
+             .has("negone-parity"))
+  {
+    applyPass("exp-negone-parity", ap);
+  }
+
   Trace("smt") << " assertions     : " << ap.size() << endl;
 
   if (options().quantifiers.globalNegate)
@@ -203,11 +216,20 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
 
   // Assertions MUST BE guaranteed to be rewritten by this point
   applyPass("rewrite", ap);
+  if (options().smt.pbvDivLemmas)
+  {
+    applyPass("pbv-div-lemmas", ap);
+  }
   // Multi-width PBV rewrites must run BEFORE the translation: psign_extend's
   // integer encoding is an msb ITE plus two extra pow2 terms and a product,
   // which cannot be undone once built.
   if (options().smt.pbvPreprocessMw || options().smt.pbvSextToZext
-      || options().smt.pbvShiftAddDistrib)
+      || options().smt.pbvShiftAddDistrib || options().smt.pbvMaskSlice != options::PbvMaskSliceMode::NONE
+      || options().smt.pbvMwTruncPush || options().smt.pbvMwLowMask
+      || options().smt.pbvMwExtBitwise || options().smt.pbvMwSextBv1
+      || options().smt.pbvMwSextIdioms || options().smt.pbvMwSignedRange
+      || options().smt.pbvMwShiftBitwise || options().smt.pbvMwSignIdioms
+      || options().smt.pbvMwMaskFacts)
   {
     applyPass("pbv-mw", ap);
   }
@@ -220,6 +242,29 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   if (options().smt.expReduceModPow)
   {
     applyPass("exp-mod-pow", ap);
+  }
+
+  // State b^j | b^e for every constant-base power. This has to run AFTER
+  // pbv-to-int: the `(** 2 k)` terms it is about do not exist until that pass
+  // creates them, so an earlier placement simply finds nothing.
+  if (options().arith.expDivisibilityDepth > 0)
+  {
+    applyPass("exp-divisibility", ap);
+  }
+
+  // State (** b u) | M for every product M with a (** b t) factor. Same
+  // placement constraint as exp-divisibility above: the power terms it pairs
+  // up are created by pbv-to-int.
+  if (options().arith.expProdDivides > 0)
+  {
+    applyPass("exp-prod-divides", ap);
+  }
+
+  // n-fold same-base power fusion. Placed with the other exp passes; on the
+  // PBV workload the powers it folds are also created by pbv-to-int.
+  if (options().arith.expPowFuse > 1)
+  {
+    applyPass("exp-pow-fuse", ap);
   }
 
   // Convert non-top-level Booleans to bit-vectors of size 1
@@ -363,6 +408,46 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   // pass could not be used for this purpose.
 
   // rewrite terms based on static theory-specific rewriting
+  // Order the equal-exponent powers by their base. Runs after the final
+  // rewrite above, which is what decides the SHAPE the powers are in -- the
+  // pass has to see `(2^e)*(2^e)` or `(2^e)^2` as the rewrites left it, since
+  // which of the two it is determines how the fused `4^e` is introduced.
+  // Clear denominators in arithmetic equalities. Runs before the division
+  // terms are purified, which is what makes them visible here. Implied by
+  // --arith-exp-base-order unless set explicitly.
+  if (options().arith.arithRatIdentity
+      || (options().arith.expBaseOrder
+          && !options().arith.arithRatIdentityWasSetByUser))
+  {
+    applyPass("arith-rat-identity", ap);
+  }
+  if (options().arith.expBaseOrder)
+  {
+    applyPass("exp-base-order", ap);
+  }
+  // Certify-and-delete vacuous polynomial equalities. Runs LATE, after the
+  // substitution passes: the once-occurring variables it keys on are mostly
+  // created BY those passes, so an early placement finds almost none.
+  if (options().arith.arithFermatVacuity)
+  {
+    applyPass("arith-fermat-vacuity", ap);
+  }
+  // Try to discharge the whole problem with a verified witness. Runs last of
+  // the arithmetic passes: it benefits from every simplification above, and
+  // when it succeeds nothing after it has any work left to do.
+  if (options().arith.arithWitnessSearch > 0
+      || options().arith.arithWitnessEnum > 0)
+  {
+    applyPass("arith-witness-search", ap);
+  }
+  // Normalise PBV shift/width arithmetic. Runs after the final rewrite, whose
+  // polynomial normal form exposes the monomials it works on, and after the
+  // witness search, whose evaluator does not read the ite terms it introduces.
+  if (options().arith.arithPow2Norm)
+  {
+    applyPass("arith-pow2-norm", ap);
+  }
+
   applyPass("static-rewrite", ap);
   // apply theory preprocess, which includes ITE removal
   applyPass("theory-preprocess", ap);

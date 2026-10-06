@@ -97,10 +97,53 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
    */
   void scanAssertion(Node n) { buildKappaUnionFind(n); }
 
+  /**
+   * --pbv-uts-mode=flip, applied at the PBV level BEFORE translation: every
+   * signed comparison in n is rewritten into the unsigned one over both
+   * operands biased by the sign threshold,
+   *   a <s b   -->   pbvult(pbvadd(a, H), pbvadd(b, H)),
+   *   H = int_to_pbv(pbvsize a, pow2(pbvsize a - 1)),
+   * and likewise for <=s, >s, >=s with pbvule/pbvugt/pbvuge. Adding the
+   * threshold and wrapping maps the signed order onto the unsigned one; the
+   * wrap is not written here at all -- it is pbvadd's own bit-vector
+   * semantics, and appears only through pbvadd's translation. No uts term
+   * and no case split. Returns n unchanged when it holds no signed
+   * comparison. Memoized.
+   */
+  Node flipSignedCompares(Node n);
+
   /** Look up χ(pbvVar) without creating one. Returns null if absent. */
   Node lookupChi(Node pbvVar) const;
   /** Look up κ(pbvVar) without creating one. Returns null if absent. */
   Node lookupKappa(Node pbvVar) const;
+
+  /**
+   * --solve-bv-as-int=pbv-direct: translate fixed-width BITVECTOR_* terms
+   * with this blaster directly, without any BV->PBV lifting. A bit-vector
+   * term is handled as the PBV term of the same shape whose kappa is its
+   * type's width (computeKappa already returns that constant for a
+   * BV-typed term): a BV variable gets a chi and the range 0 <= chi < 2^k
+   * with k a literal, a BV constant is its integer value, and every
+   * supported operator dispatches to the PBV case of bvKindToPbv. Off by
+   * default, so that pbv-to-int keeps leaving a genuine BV term alone.
+   */
+  void setBvDirect(bool b) { d_bvDirect = b; }
+  bool isBvDirect() const { return d_bvDirect; }
+  /**
+   * The PBV kind a fixed-width BV kind translates as in direct mode, or
+   * UNDEFINED_KIND when this blaster has no case for it (rotate, repeat,
+   * bvcomp, the overflow predicates, ...). The three parameterized kinds
+   * extract / zero_extend / sign_extend map too; their operator indices
+   * are turned into the integer children the PBV cases expect.
+   */
+  static Kind bvKindToPbv(Kind k);
+  /**
+   * True iff every bit-vector kind in n is one direct mode translates, so
+   * the caller can fall back to native bit-vectors otherwise. BV-typed
+   * variables, constants, ite, equality and UF applications are always
+   * fine.
+   */
+  static bool bvDirectSupports(Node n);
 
  protected:
   /**
@@ -146,7 +189,20 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
    *   utsSym(k, x) = x - ite(x < pow2(k-1), 0, pow2(k))
    * Correct over the range [0, pow2(k)) established by RANGE constraints.
    */
+  /** The sign-bit threshold pow2(k-1) (spelled pow2(k) div 2 under
+   * --pbv-uts-with-k): a k-bit x in [0, pow2(k)) is negative iff x >= it. */
+  Node signThreshold(Node k);
+
   Node utsSym(Node k, Node x);
+
+  /**
+   * Build the translation of a signed comparison `a <rel> b` over operands
+   * already translated to Int, where `rel` is one of LT/LEQ/GT/GEQ and both
+   * operands have symbolic width k.  Under --pbv-uts-mode=mod|ite this is
+   * `rel(utsSym(k, a), utsSym(k, b))`; under `sign` it is the sign-bit case
+   * split, which never mentions pow2(k) inside the comparison.
+   */
+  Node mkSignedCompare(Kind rel, Node k, Node a, Node b);
 
   /**
    * Match smt-switch AbstractPBVWalker::bvlshr(x, y) (default form):
@@ -301,9 +357,14 @@ class PIntBlaster : protected EnvObj, public ProofGenerator
 
  private:
 
+  /** See setBvDirect. */
+  bool d_bvDirect = false;
+
   // ---- caches (context-dependent) ----------------------------------------
   /** Memoization for makeBinary. */
   CDNodeMap d_binarizeCache;
+  /** Memoization for flipSignedCompares. */
+  std::unordered_map<Node, Node> d_flipCache;
   /** Main translation cache: original node → CONV(node). */
   CDNodeMap d_intblastCache;
   /** χ map: free PBV variable x → fresh Int skolem χ(x). */

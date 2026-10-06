@@ -947,6 +947,26 @@ class CVC5_EXPORT SolverEngine
   void checkUnsatCore();
 
   /**
+   * --check-lemmas: test the lemmas the theory solvers recorded during the
+   * last check-sat (see Env::recordLemmaForCheck), and/or write them to an
+   * SMT-LIB file. Raises an error if the recorded set is inconsistent or if
+   * some lemma is not valid.
+   */
+  void checkLemmas();
+
+ public:
+  /**
+   * --check-lemmas: run the lemma tests deferred by the last check-sat, if
+   * any. Called by the check-sat command AFTER the answer has been printed,
+   * so the verdict (or error) follows the sat/unsat line.
+   */
+  void runPendingLemmaCheck();
+
+ private:
+  /** --check-lemmas: a check-sat has run and its lemma test is still due. */
+  bool d_lemmaCheckPending = false;
+
+  /**
    * Check that a generated Model (via getModel()) actually satisfies
    * all user assertions.
    * @param hardFailure True have a failed model check should result in an

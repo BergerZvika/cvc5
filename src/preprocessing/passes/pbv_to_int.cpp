@@ -35,6 +35,7 @@
 #include "theory/pbv/theory_pbv_rewriter.h"
 #include "theory/rewriter.h"
 #include "theory/smt_engine_subsolver.h"
+#include "util/bitvector.h"
 
 namespace cvc5::internal {
 namespace preprocessing {
@@ -66,6 +67,19 @@ PreprocessingPassResult PBVToInt::applyInternal(
   for (uint64_t i = 0; i < assertionsToPreprocess->size(); ++i)
   {
     assertionsToPreprocess->ensureRewritten(i);
+    // --pbv-uts-mode=flip is a PBV-level rewrite of the signed comparisons
+    // (pbvult over pbvadd-biased operands); apply it before the pre-scan so
+    // the kappa union-find and the translation both see the flipped form.
+    if (options().smt.pbvUtsMode == options::PbvUtsMode::FLIP)
+    {
+      Node a = (*assertionsToPreprocess)[i];
+      Node fa = d_intBlaster.flipSignedCompares(a);
+      if (fa != a)
+      {
+        assertionsToPreprocess->replace(i, fa);
+        assertionsToPreprocess->ensureRewritten(i);
+      }
+    }
     d_intBlaster.scanAssertion((*assertionsToPreprocess)[i]);
   }
   // Harvest the width constraints before translation; see d_widthAssertions.
@@ -101,6 +115,25 @@ PreprocessingPassResult PBVToInt::applyInternal(
   }
   addFinalizeAssertions(assertionsToPreprocess, additionalConstraints);
   addSkolemDefinitions(skolems);
+
+  // --solve-bv-as-int=pbv-pipeline: the bv-to-int pass lifted each BV
+  // variable x to pbv_x and left the translation to us, so the model value
+  // of x is ours to define: x := ((_ nat2bv k) chi(pbv_x)), the same
+  // definition mode `pbv` adds from inside bv-to-int. A pbv_x with no chi
+  // never reached the blaster (its assertions folded away), so x is free.
+  {
+    NodeManager* nm = nodeManager();
+    std::map<Node, Node> bvModelDefs;
+    for (const auto& [bvVar, pbvVar] : d_preprocContext->getLiftedBvVars())
+    {
+      Node chi = d_intBlaster.lookupChi(pbvVar);
+      if (chi.isNull()) continue;
+      uint32_t k = bvVar.getType().getBitVectorSize();
+      Node nat2bvOp = nm->mkConst<IntToBitVector>(IntToBitVector(k));
+      bvModelDefs[bvVar] = nm->mkNode(nat2bvOp, chi);
+    }
+    addSkolemDefinitions(bvModelDefs);
+  }
 
   // Type checking (opt-in). Runs on the translated assertions, where widths
   // are ordinary Int symbols, so the query is a plain arithmetic formula.

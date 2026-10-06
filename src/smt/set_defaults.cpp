@@ -15,10 +15,16 @@
 
 #include "smt/set_defaults.h"
 
+#include <algorithm>
+#include <cctype>
 #include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "base/output.h"
 #include "options/arith_options.h"
+#include "theory/arith/exp_feature_set.h"
 #include "options/arrays_options.h"
 #include "options/bags_options.h"
 #include "options/base_options.h"
@@ -126,14 +132,346 @@ void SetDefaults::setDefaults(LogicInfo& logic, Options& opts)
 {
   // initial changes that are independent of logic, and may impact the logic
   setDefaultsPre(opts);
+  // --arith-tune-for-logic: pick an arithmetic strategy from the INPUT logic.
+  //
+  // This runs before finalizeLogic on purpose. finalizeLogic calls widenLogic,
+  // which enables theories the solver needs internally rather than ones the
+  // user asked for -- it turns UF on for strings, sets and higher order, and
+  // an earlier version of this block placed after it fired the UFNIA rule on
+  // plain QF_NIA. Reading the logic here is the only way to see what was
+  // actually declared.
+  //
+  // Both rules supply a DEFAULT only: SET_AND_NOTIFY_IF_NOT_USER leaves an
+  // explicitly given option alone, and neither rule ever turns anything off.
+  if (opts.arith.arithTuneForLogic != options::ArithTuneForLogicMode::NONE)
+  {
+    // Both rules read the DECLARED logic name. Asking isTheoryEnabled(PBV)
+    // instead would also fire on `ALL`, which enables every theory including
+    // PBV -- and `ALL` is what the LoAT benchmarks declare, so they would have
+    // been handed the PBV rule. getLogicString() reports `ALL` as "ALL"
+    // rather than expanding it, which is exactly the distinction wanted here.
+    const std::string ls = logic.getLogicString();
+    if (ls.find("PBV") != std::string::npos)
+    {
+      // Parametric bit-vectors. After the translation to integers this is
+      // nonlinear integer arithmetic over BOUNDED variables, which is the
+      // shape interval propagation is built for. Which ICP the mode picks --
+      // or none at all, under 'fermat'.
+      switch (opts.arith.arithTuneForLogic)
+      {
+        case options::ArithTuneForLogicMode::ICP:
+          SET_AND_NOTIFY_IF_NOT_USER(arith, nlICP, true, "PBV logic");
+          break;
+        case options::ArithTuneForLogicMode::ICP_FIX:
+          SET_AND_NOTIFY_IF_NOT_USER(arith, nlICPFix, true, "PBV logic");
+          break;
+        default: break;  // 'fermat' leaves a PBV logic alone
+      }
+    }
+    else
+    {
+      // The UFNIA family, in every mode but 'none'. Matched by name, so
+      // anything spelled with UFNIA in it (UFNIA, QF_UFNIA, AUFNIA) is
+      // covered, and structurally -- UF present, integers used, not linear --
+      // which additionally catches `ALL`, the logic these benchmarks are
+      // actually written in.
+      bool byName = ls.find("UFNIA") != std::string::npos;
+      bool byShape = logic.isTheoryEnabled(theory::THEORY_UF)
+                     && logic.areIntegersUsed() && !logic.isLinear();
+      if (byName || byShape)
+      {
+        SET_AND_NOTIFY_IF_NOT_USER(
+            arith, arithFermatVacuity, true, "UFNIA-family logic");
+      }
+    }
+  }
   // now, finalize the logic
   finalizeLogic(logic, opts);
   // further changes to options based on the logic
   setDefaultsPost(logic, opts);
 }
 
+
+namespace {
+/**
+ * Parse a --pbv-mw=LIST value into (token -> value) pairs. A bare token maps
+ * to the empty string; `tok=val` maps to `val`. Separators are the same set
+ * the --arith-exp-* lists accept. Tokens are lowercased; 'none' contributes
+ * nothing, so listing it alongside others is harmless.
+ */
+std::vector<std::pair<std::string, std::string>> parsePbvMwList(
+    const std::string& spec)
+{
+  std::vector<std::pair<std::string, std::string>> res;
+  std::string tok;
+  auto flush = [&]() {
+    if (tok.empty()) return;
+    std::transform(tok.begin(), tok.end(), tok.begin(), [](unsigned char c) {
+      return std::tolower(c);
+    });
+    size_t eq = tok.find('=');
+    if (eq == std::string::npos)
+    {
+      res.emplace_back(tok, "");
+    }
+    else
+    {
+      res.emplace_back(tok.substr(0, eq), tok.substr(eq + 1));
+    }
+    tok.clear();
+  };
+  for (char c : spec)
+  {
+    if (c == ',' || c == ' ' || c == '+' || c == ';')
+    {
+      flush();
+    }
+    else
+    {
+      tok.push_back(c);
+    }
+  }
+  flush();
+  return res;
+}
+}  // namespace
+
 void SetDefaults::setDefaultsPre(Options& opts)
 {
+  // --solve-bv-as-int=pbv is the tuned PBV configuration: the mode alone
+  // selects the whole flag set below. Every entry is a DEFAULT only --
+  // SET_AND_NOTIFY_IF_NOT_USER leaves an explicitly given option alone, so
+  // e.g. `--solve-bv-as-int=pbv --pbv-rw-mw=none` subtracts one family. This
+  // runs BEFORE the --pbv-mw expansion so that an explicit --pbv-mw=LIST,
+  // which sets the same families, overrides the values chosen here.
+  // --decision=stoponly is set in setDefaultDecisionMode, which is where the
+  // logic-driven decision default is computed and would otherwise override
+  // an early setting.
+  if (opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV
+      || opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_PIPELINE
+      || opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_DIRECT)
+  {
+    const char* reason = "--solve-bv-as-int=pbv";
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        arith, expLemmasMode, std::string("exp-full"), reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt,
+        analyzeExpInstances,
+        options::AnalyzeExpInstancesMode::MULTIPLY_ONLY_RELATE,
+        reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvRwMw, options::PbvRwMwMode::CAV26, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvMaskSlice, options::PbvMaskSliceMode::ALL, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        arith, piAndLemmaMode, options::PIAndLemmaMode::COMPLEMENT, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
+    // Lift UF symbols with the terms, so QF_UFBV inputs type-check after
+    // the BV->PBV lift (see the option's help). `--no-pbv-lift-uf` opts out.
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvLiftUf, true, reason);
+  }
+
+  // --pbv-mw=LIST is a single spelling for the opt-in multi-width PBV
+  // families, each of which also has its own standalone --pbv-* flag. Expand
+  // it here, before anything reads those flags. SET_AND_NOTIFY_IF_NOT_USER
+  // gives the precedence rule: an explicitly given standalone flag wins, so
+  // e.g. `--pbv-mw=pbv --pbv-rw-bool=false` subtracts one family from the
+  // aggregate.
+  if (opts.smt.pbvMw != "none")
+  {
+    bool doPreprocess = false, doSextToZext = false, doShiftAddDistrib = false;
+    bool doAc = false, doBool = false, doNnf = false, doShiftZextMerge = false;
+    bool doShiftGuardElim = false, doPartialMod = false;
+    options::PbvMaskSliceMode maskSlice = options::PbvMaskSliceMode::NONE;
+    options::PbvRwMwMode rwMw = options::PbvRwMwMode::NONE;
+    options::PbvReduceModsMode redMods = options::PbvReduceModsMode::NONE;
+    // A mode-valued token: bare means 'all', otherwise the named family.
+    auto modeArg = [&opts](const std::string& tok,
+                           const std::string& val,
+                           auto none,
+                           auto base,
+                           auto cav26,
+                           auto all) {
+      if (val.empty() || val == "all") return all;
+      if (val == "base") return base;
+      if (val == "cav26") return cav26;
+      if (val == "none") return none;
+      std::stringstream ss;
+      ss << "Unknown value '" << val << "' for the '" << tok
+         << "' token of --pbv-mw; expected base, cav26, all or none.";
+      throw FatalOptionException(ss.str());
+    };
+    for (const auto& [tok, val] : parsePbvMwList(opts.smt.pbvMw))
+    {
+      bool aggPbv = (tok == "pbv");
+      bool aggAll = (tok == "all");
+      if (aggPbv || aggAll)
+      {
+        // The tuned multi-width configuration. 'all' is this plus the four
+        // families it leaves out.
+        doPreprocess = doSextToZext = doShiftAddDistrib = true;
+        doAc = doBool = true;
+        rwMw = options::PbvRwMwMode::BASE_CAV26;
+        redMods = options::PbvReduceModsMode::ALL;
+        if (aggAll)
+        {
+          doNnf = doShiftZextMerge = doShiftGuardElim = doPartialMod = true;
+          maskSlice = options::PbvMaskSliceMode::MASKED;
+        }
+        continue;
+      }
+      if (tok == "none") continue;
+      if (tok == "preprocess") doPreprocess = true;
+      else if (tok == "sext-to-zext") doSextToZext = true;
+      else if (tok == "shift-add-distrib") doShiftAddDistrib = true;
+      else if (tok == "ac") doAc = true;
+      else if (tok == "bool") doBool = true;
+      else if (tok == "nnf") doNnf = true;
+      else if (tok == "shift-zext-merge") doShiftZextMerge = true;
+      else if (tok == "shift-guard-elim") doShiftGuardElim = true;
+      else if (tok == "partial-mod") doPartialMod = true;
+      else if (tok == "mask-slice")
+      {
+        if (val.empty() || val == "masked")
+          maskSlice = options::PbvMaskSliceMode::MASKED;
+        else if (val == "all")
+          maskSlice = options::PbvMaskSliceMode::ALL;
+        else if (val == "none")
+          maskSlice = options::PbvMaskSliceMode::NONE;
+        else
+        {
+          std::stringstream ss;
+          ss << "Unknown value '" << val
+             << "' for the 'mask-slice' token of --pbv-mw; expected masked, "
+                "all or none.";
+          throw FatalOptionException(ss.str());
+        }
+      }
+      else if (tok == "rw-mw")
+      {
+        rwMw = modeArg(tok,
+                       val,
+                       options::PbvRwMwMode::NONE,
+                       options::PbvRwMwMode::BASE,
+                       options::PbvRwMwMode::CAV26,
+                       options::PbvRwMwMode::BASE_CAV26);
+      }
+      else if (tok == "reduce-mods")
+      {
+        redMods = modeArg(tok,
+                          val,
+                          options::PbvReduceModsMode::NONE,
+                          options::PbvReduceModsMode::BASE,
+                          options::PbvReduceModsMode::CAV26,
+                          options::PbvReduceModsMode::ALL);
+      }
+      else
+      {
+        std::stringstream ss;
+        ss << "Unknown token '" << tok
+           << "' in --pbv-mw; see --pbv-mw=help for the list.";
+        throw FatalOptionException(ss.str());
+      }
+    }
+    const char* reason = "--pbv-mw";
+    if (doPreprocess)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
+    if (doSextToZext)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
+    if (doShiftAddDistrib)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
+    if (doAc) SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
+    if (doBool) SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
+    if (doNnf) SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwNnf, true, reason);
+    if (doShiftZextMerge)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwShiftZextMerge, true, reason);
+    if (doShiftGuardElim)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftGuardElim, true, reason);
+    if (doPartialMod)
+      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvToIntPartialMod, true, reason);
+    if (maskSlice != options::PbvMaskSliceMode::NONE)
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvMaskSlice, maskSlice, reason);
+    if (rwMw != options::PbvRwMwMode::NONE)
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvRwMw, rwMw, reason);
+    if (redMods != options::PbvReduceModsMode::NONE)
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvToIntReduceMods, redMods, reason);
+  }
+
+  // --pbv-rw-mw=all: the tuned PBV preprocessing line in one flag. The
+  // rewriter itself runs the cav26 family for this mode. --pbv-rw-mw=all-no-bug
+  // sets the same line, but the rewriter does not run cav26 for it (its rules
+  // drop the operands of an n-ary pbvand).
+  if (opts.smt.pbvRwMw == options::PbvRwMwMode::ALL
+      || opts.smt.pbvRwMw == options::PbvRwMwMode::ALL_NO_BUG)
+  {
+    const char* reason = opts.smt.pbvRwMw == options::PbvRwMwMode::ALL
+                             ? "--pbv-rw-mw=all"
+                             : "--pbv-rw-mw=all-no-bug";
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvMaskSlice, options::PbvMaskSliceMode::ALL, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
+    // the bitwise rewrite families of pbv-mw and the division lemmas
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwShiftBitwise, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSignIdioms, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwMaskFacts, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvDivLemmas, true, reason);
+    // Must stay before the --pbv-mw-ext-norm block below, which expands it.
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwExtNorm, true, reason);
+  }
+
+  // --pbv-mw-ext-norm: the extension-normalization families of pbv-mw.
+  if (opts.smt.pbvMwExtNorm)
+  {
+    const char* reason = "--pbv-mw-ext-norm";
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwTruncPush, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwLowMask, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwExtBitwise, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextBv1, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextIdioms, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSignedRange, true, reason);
+  }
+
+  // --arith-exp-lemmas=all also selects the arithmetic preprocessing line.
+  {
+    bool expAll = false;
+    std::stringstream toks(opts.arith.expLemmasMode);
+    std::string tok;
+    while (std::getline(toks, tok, ','))
+    {
+      expAll = expAll || tok == "all";
+    }
+    if (expAll)
+    {
+      const char* reason = "--arith-exp-lemmas=all";
+      SET_AND_NOTIFY_IF_NOT_USER(arith, expBaseOrder, true, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithPow2Norm, true, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearch, 200, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearchSigned, true, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessEnum, 20000, reason);
+      // The reduce-mods post-pass of pbv-to-int runs on ANY `mod 2^k`, not
+      // only on translated PBV terms, so it also pays off on integer input
+      // that is already a PBV translation (sat25-no-piand).
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+          smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
+    }
+  }
+
   // safe options
   if (options().base.safeMode != options::SafeMode::UNRESTRICTED)
   {
@@ -872,6 +1210,13 @@ void SetDefaults::setDefaultsPost(const LogicInfo& logic, Options& opts) const
     SET_AND_NOTIFY(
         arith, nlExtTangentPlanesInterleave, true, "pure integer logic");
   }
+  // Two selections on --arith-exp-lemmas reach outside that list and turn on
+  // the two passes that discharge the LoAT `size0*` shapes: once-occurring
+  // linear variables are eliminated, and the congruences that leaves are
+  // decided by residue enumeration. Those selections are the 'exp' aggregate
+  // and 'all'. A feature set cannot write options, so it is done here. Either
+  // option given explicitly still wins.
+  //
   if (!opts.arith.nlRlvAssertBoundsWasSetByUser)
   {
     bool val = !logic.isQuantified();
@@ -1829,6 +2174,18 @@ void SetDefaults::setDefaultDecisionMode(const LogicInfo& logic,
   // Set decision mode based on logic (if not set by user)
   if (opts.decision.decisionModeWasSetByUser)
   {
+    return;
+  }
+  // The tuned PBV configuration uses stoponly regardless of the logic; see
+  // the --solve-bv-as-int=pbv block in setDefaultsPre.
+  if (opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV
+      || opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_PIPELINE
+      || opts.smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_DIRECT)
+  {
+    SET_AND_NOTIFY_VAL_SYM(decision,
+                           decisionMode,
+                           options::DecisionMode::STOPONLY,
+                           "--solve-bv-as-int=pbv");
     return;
   }
   options::DecisionMode decMode =

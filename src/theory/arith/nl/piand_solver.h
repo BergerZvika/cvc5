@@ -95,6 +95,12 @@ class PIAndSolver : protected EnvObj
   /** PIAND terms that have been given initial refinement lemmas */
 
   NodeSet d_initRefine;
+  /**
+   * PIAND terms created by the --piand-lemmas=complement split. They come back
+   * in d_piands like any other term; recording them keeps the split from being
+   * applied to its own output.
+   */
+  NodeSet d_complementIntroduced;
   /** all PIAND terms, for each bit-width */
 
   std::map<Node, std::vector<Node>> d_piands;

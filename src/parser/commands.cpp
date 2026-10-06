@@ -36,6 +36,7 @@
 #include "parser/sym_manager.h"
 #include "printer/printer.h"
 #include "proof/unsat_core.h"
+#include "smt/solver_engine.h"
 #include "util/smt2_quote_string.h"
 #include "util/utility.h"
 
@@ -126,6 +127,17 @@ void Cmd::invoke(cvc5::Solver* solver,
   else
   {
     printResult(solver, out);
+    out << std::flush;
+    // deferred work whose output must follow the answer
+    try
+    {
+      postPrintResult(solver);
+    }
+    catch (std::exception& e)
+    {
+      d_commandStatus = new CommandFailure(e.what());
+      out << *d_commandStatus;
+    }
   }
   // always flush the output
   out << std::flush;
@@ -145,6 +157,17 @@ void Cmd::invokeAndPrintResult(cvc5::Solver* solver,
   else
   {
     printResult(solver, out);
+    out << std::flush;
+    // deferred work whose output must follow the answer
+    try
+    {
+      postPrintResult(solver);
+    }
+    catch (std::exception& e)
+    {
+      d_commandStatus = new CommandFailure(e.what());
+      out << *d_commandStatus;
+    }
   }
   // always flush the output
   out << std::flush;
@@ -180,6 +203,11 @@ void Cmd::resetSolver(cvc5::Solver* solver)
   TermManager& tm = solver->getTermManager();
   solver->~Solver();
   new (solver) cvc5::Solver(tm, std::move(opts));
+}
+
+internal::SolverEngine* Cmd::solverEngineOf(cvc5::Solver* solver)
+{
+  return solver->d_slv.get();
 }
 
 internal::Node Cmd::termToNode(const cvc5::Term& term)
@@ -378,9 +406,31 @@ void CheckSatCommand::invoke(cvc5::Solver* solver, SymManager* sm)
 
 cvc5::Result CheckSatCommand::getResult() const { return d_result; }
 
+namespace {
+/**
+ * Under --check-lemmas=check|dump|both the answer to the input formula is not
+ * printed: the only output is the verdict on the recorded lemmas, written by
+ * postPrintResult.
+ */
+bool suppressAnswerForLemmaCheck(cvc5::Solver* solver)
+{
+  return solver->getOption("check-lemmas") != "none";
+}
+}  // namespace
+
 void CheckSatCommand::printResult(cvc5::Solver* solver, std::ostream& out) const
 {
+  if (suppressAnswerForLemmaCheck(solver))
+  {
+    return;
+  }
   out << d_result << endl;
+}
+
+void CheckSatCommand::postPrintResult(cvc5::Solver* solver)
+{
+  // --check-lemmas: the verdict (or error) goes after the answer
+  solverEngineOf(solver)->runPendingLemmaCheck();
 }
 
 std::string CheckSatCommand::getCommandName() const { return "check-sat"; }
@@ -434,7 +484,16 @@ cvc5::Result CheckSatAssumingCommand::getResult() const
 void CheckSatAssumingCommand::printResult(cvc5::Solver* solver,
                                           std::ostream& out) const
 {
+  if (suppressAnswerForLemmaCheck(solver))
+  {
+    return;
+  }
   out << d_result << endl;
+}
+
+void CheckSatAssumingCommand::postPrintResult(cvc5::Solver* solver)
+{
+  solverEngineOf(solver)->runPendingLemmaCheck();
 }
 
 std::string CheckSatAssumingCommand::getCommandName() const

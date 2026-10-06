@@ -51,9 +51,13 @@ BVToInt::BVToInt(PreprocessingPassContext* preprocContext)
                    options().smt.solveBVAsInt,
                    options().smt.BVAndIntegerGranularity)
 {
-  if (options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV)
+  if (options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV
+      || options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_PIPELINE
+      || options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_DIRECT)
   {
     d_pIntBlaster.reset(new PIntBlaster(preprocContext->getEnv()));
+    d_pIntBlaster->setBvDirect(options().smt.solveBVAsInt
+                               == options::SolveBVAsIntMode::PBV_DIRECT);
   }
 }
 
@@ -67,8 +71,54 @@ PreprocessingPassResult BVToInt::applyInternal(
   std::vector<TrustNode> additionalConstraints;
   std::map<Node, Node> skolems;
 
-  // PBV mode: lift each BV assertion to PBV first, then run PIntBlaster.
-  if (options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV)
+  // pbv-direct: no lifting. Hand each BV assertion to the PIntBlaster as
+  // is; it dispatches BITVECTOR_* kinds as their PBV counterparts with the
+  // literal sort width as kappa (PIntBlaster::setBvDirect). The whole run
+  // falls back to native bit-vectors if any assertion holds an operator it
+  // has no case for, for the same soundness reason as the lifted modes: a
+  // variable shared between a translated and an untranslated assertion
+  // would lose the constraint tying its two encodings together.
+  if (options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_DIRECT)
+  {
+    for (uint64_t i = 0; i < assertionsToPreprocess->size(); ++i)
+    {
+      assertionsToPreprocess->ensureRewritten(i);
+      if (!PIntBlaster::bvDirectSupports((*assertionsToPreprocess)[i]))
+      {
+        Trace("bv-to-int-debug")
+            << "pbv-direct: unsupported BV op, falling back to native BV"
+            << std::endl;
+        return PreprocessingPassResult::NO_CONFLICT;
+      }
+    }
+    for (uint64_t i = 0; i < assertionsToPreprocess->size(); ++i)
+    {
+      Node bvNode = (*assertionsToPreprocess)[i];
+      TrustNode tr = d_pIntBlaster->trustedIntBlast(
+          bvNode, additionalConstraints, skolems);
+      if (tr.isNull()) continue;
+      Trace("bv-to-int-debug") << "bv  node: " << bvNode << std::endl;
+      Trace("bv-to-int-debug")
+          << "int node: " << tr.getProven()[1] << std::endl;
+      assertionsToPreprocess->replaceTrusted(i, tr);
+      assertionsToPreprocess->ensureRewritten(i);
+    }
+    // The BV variables' back-definitions ((_ int_to_bv k) chi(x)) and the
+    // UF lambdas arrive through `skolems`, so the model is recovered by the
+    // ordinary skolem-definition step.
+    addFinalizeAssertions(assertionsToPreprocess, additionalConstraints);
+    addSkolemDefinitions(skolems);
+    return PreprocessingPassResult::NO_CONFLICT;
+  }
+
+  // PBV modes: lift each BV assertion to PBV first. In mode `pbv` the
+  // PIntBlaster is then run right here; in mode `pbv-pipeline` the lifted
+  // PBV assertions are left in the pipeline for the `rewrite`, `pbv-mw` and
+  // `pbv-to-int` passes, exactly as a native PBV input.
+  const bool pbvPipeline =
+      options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV_PIPELINE;
+  if (options().smt.solveBVAsInt == options::SolveBVAsIntMode::PBV
+      || pbvPipeline)
   {
     NodeManager* nm = nodeManager();
     // Phase 1: lift every assertion. This also populates d_bvVarPbv with the
@@ -80,6 +130,14 @@ PreprocessingPassResult BVToInt::applyInternal(
       assertionsToPreprocess->ensureRewritten(i);
       lifted[i] = liftBvToPbv((*assertionsToPreprocess)[i]);
       if (lifted[i].isNull()) allLifted = false;
+      // --pbv-uts-mode=flip: PBV-level rewrite of the signed comparisons,
+      // see PIntBlaster::flipSignedCompares. In pipeline mode pbv-to-int
+      // applies it itself, after the PBV rewriter has run.
+      else if (!pbvPipeline
+               && options().smt.pbvUtsMode == options::PbvUtsMode::FLIP)
+      {
+        lifted[i] = d_pIntBlaster->flipSignedCompares(lifted[i]);
+      }
     }
     // If any assertion contains a BV operator we cannot lift to PBV (e.g.
     // bvcomp, the overflow predicates), abandon the PBV translation entirely
@@ -107,6 +165,36 @@ PreprocessingPassResult BVToInt::applyInternal(
       Node size = nm->mkNode(Kind::PBV_SIZE, pbvVar);
       Node pin = nm->mkNode(Kind::EQUAL, size, nm->mkConstInt(Rational(k)));
       assertionsToPreprocess->push_back(pin);
+    }
+    // --pbv-lift-uf: a lifted UF application is a width leaf exactly like a
+    // lifted variable, so its (formerly bit-vector) result width is pinned
+    // the same way.
+    for (const auto& [app, k] : d_pbvUfApps)
+    {
+      Node size = nm->mkNode(Kind::PBV_SIZE, app);
+      Node pin = nm->mkNode(Kind::EQUAL, size, nm->mkConstInt(Rational(k)));
+      assertionsToPreprocess->push_back(pin);
+    }
+    // pbv-pipeline: swap in the lifted PBV assertions and stop. The pins
+    // above stay as ordinary assertions; pbv-to-int's pre-scan reads them as
+    // explicit-kappa pins just as it does for a native PBV input, and its
+    // translation turns them into `(= k k)`, which it then compacts away.
+    // Model recovery cannot happen here, since chi(pbv_x) is only allocated
+    // by pbv-to-int; hand it the variable pairs instead.
+    if (pbvPipeline)
+    {
+      for (uint64_t i = 0; i < lifted.size(); ++i)
+      {
+        Trace("bv-to-int-debug")
+            << "bv  node: " << (*assertionsToPreprocess)[i] << std::endl;
+        Trace("bv-to-int-debug") << "pbv node: " << lifted[i] << std::endl;
+        assertionsToPreprocess->replace(i, lifted[i]);
+      }
+      for (const auto& [bvVar, pbvVar] : d_bvVarPbv)
+      {
+        d_preprocContext->registerLiftedBvVar(bvVar, pbvVar);
+      }
+      return PreprocessingPassResult::NO_CONFLICT;
     }
     // Phase 1c: pre-scan every lifted assertion (and the pin assertions)
     // so the kappa union-find has global visibility.
@@ -242,6 +330,57 @@ Node BVToInt::liftBvToPbv(Node n)
       return Node::null();
     }
     liftedChildren.push_back(lc);
+  }
+
+  // --pbv-lift-uf: lift the FUNCTION SYMBOL too. A declared f : BV^n -> BV
+  // becomes pbv_f : PBitVec^n -> PBitVec (non-BV argument sorts kept), the
+  // application is rebuilt over pbv_f and the lifted arguments, and a
+  // BV-ranged application is recorded so Phase 1b pins its width. Without
+  // this the symbol stays BV-typed while its context is lifted, and an ite
+  // or equality between the application and a lifted term is ill-typed.
+  if (k == Kind::APPLY_UF && options().smt.pbvLiftUf)
+  {
+    Node f = n.getOperator();
+    TypeNode ft = f.getType();
+    std::vector<TypeNode> dom = ft.getArgTypes();
+    TypeNode ran = ft.getRangeType();
+    bool anyBv = ran.isBitVector();
+    for (const TypeNode& d : dom) anyBv = anyBv || d.isBitVector();
+    if (anyBv)
+    {
+      auto fit = d_bvUfPbv.find(f);
+      Node pf;
+      if (fit == d_bvUfPbv.end())
+      {
+        std::vector<TypeNode> pdom;
+        for (const TypeNode& d : dom)
+        {
+          pdom.push_back(d.isBitVector() ? nm->pbvType() : d);
+        }
+        TypeNode pran = ran.isBitVector() ? nm->pbvType() : ran;
+        std::stringstream ss;
+        ss << "pbv_" << f;
+        pf = NodeManager::mkDummySkolem(ss.str(),
+                                        nm->mkFunctionType(pdom, pran),
+                                        "BV→PBV uf",
+                                        SkolemFlags::SKOLEM_EXACT_NAME);
+        d_bvUfPbv[f] = pf;
+      }
+      else
+      {
+        pf = fit->second;
+      }
+      std::vector<Node> app;
+      app.push_back(pf);
+      app.insert(app.end(), liftedChildren.begin(), liftedChildren.end());
+      result = nm->mkNode(Kind::APPLY_UF, app);
+      if (ran.isBitVector())
+      {
+        d_pbvUfApps[result] = ran.getBitVectorSize();
+      }
+      d_liftCache[n] = result;
+      return result;
+    }
   }
 
   // Map BV kinds to PBV kinds (binary/n-ary cases first).

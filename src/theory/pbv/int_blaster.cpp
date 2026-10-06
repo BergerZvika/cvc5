@@ -106,7 +106,7 @@ TrustNode PIntBlaster::trustedIntBlast(Node n,
       Node m = st.back();
       st.pop_back();
       if (!seen.insert(m).second) continue;
-      if (m.getType().isPbv())
+      if (m.getType().isPbv() || (d_bvDirect && m.getType().isBitVector()))
       {
         hasPbv = true;
         break;
@@ -236,6 +236,13 @@ Node PIntBlaster::makeBinary(Node n)
   uint64_t numChildren = n.getNumChildren();
   Kind k = n.getKind();
   Node result = n;
+  // In direct mode the n-ary BV kinds are binarized the same way; their
+  // PBV counterparts are what the translation dispatches on.
+  if (d_bvDirect && numChildren > 2)
+  {
+    Kind pk = bvKindToPbv(k);
+    if (pk != Kind::UNDEFINED_KIND) k = pk;
+  }
   if (numChildren > 2
       && (k == Kind::PBV_CONCAT
           || k == Kind::PBV_ADD
@@ -244,6 +251,8 @@ Node PIntBlaster::makeBinary(Node n)
           || k == Kind::PBV_OR
           || k == Kind::PBV_XOR))
   {
+    // rebuild with the ORIGINAL kind: the tree is re-dispatched per node
+    k = n.getKind();
     result = n[0];
     for (uint32_t i = 1; i < numChildren; i++)
     {
@@ -411,6 +420,13 @@ Node PIntBlaster::kappaSource(Node t)
       return t;
     }
     if (t.getKind() == Kind::CONST_PBV) return t;
+    // --pbv-lift-uf: a PBV-typed UF application is a width leaf like a
+    // variable; its width is tied to the class by a pbvsize pin.
+    if (t.getKind() == Kind::APPLY_UF && t.getType().isPbv()
+        && options().smt.pbvLiftUf)
+    {
+      return t;
+    }
     Kind k = t.getKind();
     switch (k)
     {
@@ -582,9 +598,12 @@ void PIntBlaster::buildKappaUnionFind(Node n)
     if (k == Kind::EQUAL && cur.getNumChildren() == 2
         && cur[0].getType().isInteger())
     {
-      auto isPbvSizeOfLeaf = [](Node x) -> Node {
+      bool liftUf = options().smt.pbvLiftUf;
+      auto isPbvSizeOfLeaf = [liftUf](Node x) -> Node {
         if (x.getKind() == Kind::PBV_SIZE && x.getNumChildren() == 1
-            && x[0].isVar() && x[0].getType().isPbv())
+            && x[0].getType().isPbv()
+            && (x[0].isVar()
+                || (liftUf && x[0].getKind() == Kind::APPLY_UF)))
         {
           return x[0];
         }
@@ -733,6 +752,14 @@ Node PIntBlaster::computeKappa(Node t)
         // Free PBV variable: fresh κ skolem
         result = getOrCreateKappa(t);
       }
+      else if (t.getKind() == Kind::APPLY_UF && t.getType().isPbv()
+               && options().smt.pbvLiftUf)
+      {
+        // --pbv-lift-uf: a lifted UF application is a width leaf. Its width
+        // is whatever its pbvsize pin says, NOT the width of its first
+        // argument (f : BV256 -> BV8 would otherwise be sized 256).
+        result = getOrCreateKappa(t);
+      }
       else if (t.getKind() == Kind::CONST_PBV)
       {
         // Ground constant: create a fresh κ (width unknown without context)
@@ -824,25 +851,149 @@ Node PIntBlaster::modPow2Sym(Node n, Node k)
   return mkMod(n, mkPow2Sym(k));
 }
 
-Node PIntBlaster::utsSym(Node k, Node x)
+/**
+ * The threshold pow2(k-1): x is negative as a k-bit signed value iff x >= this.
+ * --pbv-uts-with-k spells it pow2(k) div 2 instead, so that pow2 is never
+ * applied to (k-1) (the POW2 operator is undefined on negative exponents).
+ */
+Node PIntBlaster::signThreshold(Node k)
 {
-  // uts(k, z) = 2 * (z mod pow2(k-1)) - z
-  // Default (sat25 form): use pow2(k-1) directly, matching the SAT'25 paper.
-  // --pbv-uts-with-k switches to the full-k form pow2(k) div 2, avoiding a
-  // (- k 1) argument to pow2 (relevant for the POW2 operator path, which is
-  // undefined on negative exponents).
-  Node halfPow2;
   if (options().smt.pbvUtsWithK)
   {
-    halfPow2 = d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
+    return d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, mkPow2Sym(k), d_two);
   }
-  else
+  return mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
+}
+
+Node PIntBlaster::utsSym(Node k, Node x)
+{
+  Node halfPow2 = signThreshold(k);
+  if (options().smt.pbvUtsMode == options::PbvUtsMode::ITE)
   {
-    halfPow2 = mkPow2Sym(d_nm->mkNode(Kind::SUB, k, d_one));
+    // uts(k, z) = z - ite(z < pow2(k-1), 0, pow2(k))
+    // Same value as the mod form on the range [0, pow2(k)) that the RANGE
+    // constraints establish, but with no mod term: the mod would be purified
+    // into a skolem carrying a nonlinear q*pow2(k-1) monomial.
+    Node msbZero = d_nm->mkNode(Kind::LT, x, halfPow2);
+    Node adjust = d_nm->mkNode(Kind::ITE, msbZero, d_zero, mkPow2Sym(k));
+    return d_nm->mkNode(Kind::SUB, x, adjust);
   }
+  // uts(k, z) = 2 * (z mod pow2(k-1)) - z, the sat25 paper form.
   Node modPart = d_nm->mkNode(modKind(), x, halfPow2);
   Node twice   = d_nm->mkNode(Kind::MULT, d_two, modPart);
   return d_nm->mkNode(Kind::SUB, twice, x);
+}
+
+Node PIntBlaster::flipSignedCompares(Node n)
+{
+  std::unordered_map<Node, Node>::iterator it = d_flipCache.find(n);
+  if (it != d_flipCache.end())
+  {
+    return it->second;
+  }
+  Node result = n;
+  if (n.getNumChildren() > 0)
+  {
+    std::vector<Node> children;
+    bool changed = false;
+    if (n.getMetaKind() == kind::metakind::PARAMETERIZED)
+    {
+      children.push_back(n.getOperator());
+    }
+    for (const Node& c : n)
+    {
+      Node fc = flipSignedCompares(c);
+      changed = changed || fc != c;
+      children.push_back(fc);
+    }
+    Kind k = n.getKind();
+    Kind urel = Kind::UNDEFINED_KIND;
+    switch (k)
+    {
+      case Kind::PBV_SLT: urel = Kind::PBV_ULT; break;
+      case Kind::PBV_SLE: urel = Kind::PBV_ULE; break;
+      case Kind::PBV_SGT: urel = Kind::PBV_UGT; break;
+      case Kind::PBV_SGE: urel = Kind::PBV_UGE; break;
+      default: break;
+    }
+    if (urel != Kind::UNDEFINED_KIND)
+    {
+      // a <s b  -->  (a + H) <u (b + H), H = pow2(k-1) as a k-bit constant.
+      // The bit-vector addition wraps on its own, which is the whole of the
+      // sign flip: it sends the negatives [H, 2^k) to [0, H) and the
+      // non-negatives [0, H) to [H, 2^k), both in order.
+      Node a = children[0];
+      Node b = children[1];
+      Node width = d_nm->mkNode(Kind::PBV_SIZE, a);
+      Node h = d_nm->mkNode(Kind::INT_TO_PBV, width, signThreshold(width));
+      Node fa = d_nm->mkNode(Kind::PBV_ADD, a, h);
+      Node fb = d_nm->mkNode(Kind::PBV_ADD, b, h);
+      result = d_nm->mkNode(urel, fa, fb);
+    }
+    else if (changed)
+    {
+      result = d_nm->mkNode(k, children);
+    }
+  }
+  d_flipCache[n] = result;
+  return result;
+}
+
+Node PIntBlaster::mkSignedCompare(Kind rel, Node k, Node a, Node b)
+{
+  if (options().smt.pbvUtsMode == options::PbvUtsMode::FLIP)
+  {
+    // Sign-bit flip.  Writing H = pow2(k-1) and P = pow2(k), biasing a k-bit
+    // value by H and reducing mod P maps the signed order onto the unsigned
+    // one: it sends [H, P) -- the negatives, in order -- to [0, H), and
+    // [0, H) -- the non-negatives -- to [H, P).  So
+    //   a <s b  ==  (a + H) mod P  <u  (b + H) mod P
+    // and likewise for the other three relations, the map being an order
+    // isomorphism rather than anything relation-specific.
+    //
+    // The `mod P` is not optional even though the same H is added to both
+    // sides: without it the bias cancels and the comparison collapses back to
+    // the unsigned one.  It is exactly the wrap of the operand that has its
+    // sign bit set, which is what moves that operand below the others.
+    //
+    // Unlike 'mod' and 'ite' this builds no uts term, and unlike 'sign' it
+    // introduces no case split -- one mod per operand and nothing else. It
+    // does mention P inside the comparison, which 'sign' avoids.
+    //
+    // Normally unreachable: flipSignedCompares rewrites every signed
+    // comparison at the PBV level before translation (pbvult over pbvadd),
+    // so the wrap comes from pbvadd's translation. This is the same term
+    // built directly over Int operands, kept for any signed comparison that
+    // reaches translation without passing through that rewrite.
+    Node h = signThreshold(k);
+    Node p = mkPow2Sym(k);
+    Node fa = mkMod(d_nm->mkNode(Kind::ADD, a, h), p);
+    Node fb = mkMod(d_nm->mkNode(Kind::ADD, b, h), p);
+    return d_nm->mkNode(rel, fa, fb);
+  }
+  if (options().smt.pbvUtsMode != options::PbvUtsMode::SIGN)
+  {
+    return d_nm->mkNode(rel, utsSym(k, a), utsSym(k, b));
+  }
+  // Sign-bit case split.  Writing H = pow2(k-1) and P = pow2(k), the signed
+  // value of a k-bit x in [0, P) is x - P*[x >= H].  When both operands have
+  // the same sign bit the same P cancels, so the signed comparison coincides
+  // with the unsigned one; when the sign bits differ, the operand with the set
+  // sign bit is the smaller one, whatever the rest of the bits are.  So
+  //   a <s b  ==  ite(negA = negB, a < b, negA)
+  //   a >s b  ==  ite(negA = negB, a > b, negB)
+  // and likewise for the non-strict versions (when the signs differ the
+  // inequality is strict, so <= agrees with < and >= with >).  Nothing here
+  // mentions P, so the only power the comparison introduces is the threshold.
+  Node h = signThreshold(k);
+  Node negA = d_nm->mkNode(Kind::GEQ, a, h);
+  Node negB = d_nm->mkNode(Kind::GEQ, b, h);
+  Node sameSign = d_nm->mkNode(Kind::EQUAL, negA, negB);
+  bool aIsSmallerWhenNeg = (rel == Kind::LT || rel == Kind::LEQ);
+  return d_nm->mkNode(Kind::ITE,
+                      sameSign,
+                      d_nm->mkNode(rel, a, b),
+                      aIsSmallerWhenNeg ? negA : negB);
 }
 
 Node PIntBlaster::bvlshrSym(Node x, Node y, Node k)
@@ -889,7 +1040,8 @@ void PIntBlaster::addRangeConstraints(Node e,
     if (!visited.insert(current).second) continue;
 
     if (current.isVar()
-        && current.getType().isPbv()
+        && (current.getType().isPbv()
+            || (d_bvDirect && current.getType().isBitVector()))
         && current.getKind() != Kind::BOUND_VARIABLE)
     {
       Node chi   = getOrCreateChi(current);
@@ -1226,7 +1378,20 @@ Node PIntBlaster::translateNoChildren(Node original,
 
   if (original.isVar())
   {
-    if (original.getType().isPbv())
+    if (d_bvDirect && original.getType().isBitVector()
+        && original.getKind() != Kind::BOUND_VARIABLE)
+    {
+      // Direct mode, free BV variable: CONV(x) = χ(x) at the literal width
+      // of its sort, and the back-definition x ≈ ((_ int_to_bv k) χ(x)) for
+      // the model.
+      translation = getOrCreateChi(original);
+      Node bvCast = castToType(translation, original.getType());
+      if (skolems.find(original) == skolems.end())
+      {
+        skolems[original] = bvCast;
+      }
+    }
+    else if (original.getType().isPbv())
     {
       if (original.getKind() == Kind::BOUND_VARIABLE)
       {
@@ -1275,6 +1440,13 @@ Node PIntBlaster::translateNoChildren(Node original,
       Integer c    = constant.getValue();
       translation  = d_nm->mkConstInt(Rational(c));
     }
+    else if (d_bvDirect && original.getKind() == Kind::CONST_BITVECTOR)
+    {
+      // Direct mode: a BV constant is its unsigned integer value; its width
+      // is fixed by its sort and needs no int_to_pbv wrapper.
+      translation = d_nm->mkConstInt(
+          Rational(original.getConst<BitVector>().getValue()));
+    }
     else
     {
       // Integer constants, Boolean constants, etc.: unchanged.
@@ -1293,7 +1465,7 @@ Node PIntBlaster::translateNoChildren(Node original,
 
 Node PIntBlaster::translateWithChildren(
     Node original,
-    const std::vector<Node>& translated_children,
+    const std::vector<Node>& translated_children_in,
     std::vector<TrustNode>& lemmas)
 {
   Kind oldKind = original.getKind();
@@ -1305,7 +1477,52 @@ Node PIntBlaster::translateWithChildren(
 
   Node returnNode;
 
-  switch (oldKind)
+  // Direct mode: a fixed-width BV operator is dispatched as its PBV
+  // counterpart. The cases below read widths through computeKappa, which
+  // hands back the literal width of a BV-typed operand, and everything else
+  // through `translated_children`. The three parameterized kinds carry
+  // their indices in the operator rather than as children, so the child
+  // vector is re-laid-out to the PBV shape here:
+  //   extract [i:j] x        -> (pbvextract x i j)
+  //   zero_extend n x        -> (pzero_extend n x)
+  //   sign_extend n x        -> (psign_extend n x)
+  // PBV_SIGN_EXTEND's case reads its operand from the ORIGINAL node too,
+  // which is why it looks at `bvSignExtend` below.
+  Kind dispatchKind = oldKind;
+  std::vector<Node> bvChildren;
+  const std::vector<Node>* tc = &translated_children_in;
+  const bool bvSignExtend =
+      d_bvDirect && oldKind == Kind::BITVECTOR_SIGN_EXTEND;
+  if (d_bvDirect && bvKindToPbv(oldKind) != Kind::UNDEFINED_KIND)
+  {
+    dispatchKind = bvKindToPbv(oldKind);
+    if (oldKind == Kind::BITVECTOR_EXTRACT)
+    {
+      const BitVectorExtract& ex =
+          original.getOperator().getConst<BitVectorExtract>();
+      bvChildren = {translated_children_in[0],
+                    d_nm->mkConstInt(Rational(ex.d_high)),
+                    d_nm->mkConstInt(Rational(ex.d_low))};
+      tc = &bvChildren;
+    }
+    else if (oldKind == Kind::BITVECTOR_ZERO_EXTEND)
+    {
+      uint32_t amt =
+          original.getOperator().getConst<BitVectorZeroExtend>().d_zeroExtendAmount;
+      bvChildren = {d_nm->mkConstInt(Rational(amt)), translated_children_in[0]};
+      tc = &bvChildren;
+    }
+    else if (oldKind == Kind::BITVECTOR_SIGN_EXTEND)
+    {
+      uint32_t amt =
+          original.getOperator().getConst<BitVectorSignExtend>().d_signExtendAmount;
+      bvChildren = {d_nm->mkConstInt(Rational(amt)), translated_children_in[0]};
+      tc = &bvChildren;
+    }
+  }
+  const std::vector<Node>& translated_children = *tc;
+
+  switch (dispatchKind)
   {
     // ---- bit-width query ---------------------------------------------------
     case Kind::PBV_SIZE:
@@ -1359,6 +1576,16 @@ Node PIntBlaster::translateWithChildren(
       {
         inRange = true;
       }
+      // t == pow2(k-1), spelled pow2(k-1) or pow2(k) div 2: the sign
+      // threshold that --pbv-uts-mode=flip biases both operands by. Below
+      // pow2(k) since ADM enforces k > 0.
+      if (!inRange
+          && (isPow2Of(t, d_nm->mkNode(Kind::SUB, k, d_one))
+              || (t.getKind() == Kind::INTS_DIVISION_TOTAL && t[1] == d_two
+                  && isPow2Of(t[0], k))))
+      {
+        inRange = true;
+      }
       returnNode = inRange ? t : modPow2Sym(t, k);
       break;
     }
@@ -1397,33 +1624,29 @@ Node PIntBlaster::translateWithChildren(
     {
       // uts(κ(t1), CONV(t1)) < uts(κ(t1), CONV(t2))
       Node k1 = computeKappa(original[0]);
-      returnNode = d_nm->mkNode(Kind::LT,
-                                utsSym(k1, translated_children[0]),
-                                utsSym(k1, translated_children[1]));
+      returnNode = mkSignedCompare(
+          Kind::LT, k1, translated_children[0], translated_children[1]);
       break;
     }
     case Kind::PBV_SLE:
     {
       Node k1 = computeKappa(original[0]);
-      returnNode = d_nm->mkNode(Kind::LEQ,
-                                utsSym(k1, translated_children[0]),
-                                utsSym(k1, translated_children[1]));
+      returnNode = mkSignedCompare(
+          Kind::LEQ, k1, translated_children[0], translated_children[1]);
       break;
     }
     case Kind::PBV_SGT:
     {
       Node k1 = computeKappa(original[0]);
-      returnNode = d_nm->mkNode(Kind::GT,
-                                utsSym(k1, translated_children[0]),
-                                utsSym(k1, translated_children[1]));
+      returnNode = mkSignedCompare(
+          Kind::GT, k1, translated_children[0], translated_children[1]);
       break;
     }
     case Kind::PBV_SGE:
     {
       Node k1 = computeKappa(original[0]);
-      returnNode = d_nm->mkNode(Kind::GEQ,
-                                utsSym(k1, translated_children[0]),
-                                utsSym(k1, translated_children[1]));
+      returnNode = mkSignedCompare(
+          Kind::GEQ, k1, translated_children[0], translated_children[1]);
       break;
     }
 
@@ -1707,7 +1930,7 @@ Node PIntBlaster::translateWithChildren(
       // translated_children[0] = n (extension width), [1] = CONV(t)
       Node n       = translated_children[0];
       Node xp      = translated_children[1];
-      Node k       = computeKappa(original[1]);
+      Node k       = computeKappa(bvSignExtend ? original[0] : original[1]);
       Node kMinus1 = d_nm->mkNode(Kind::SUB, k, d_one);
       Node msb = d_nm->mkNode(modKind(), 
           d_nm->mkNode(Kind::INTS_DIVISION_TOTAL, xp, mkPow2Sym(kMinus1)),
@@ -1727,7 +1950,8 @@ Node PIntBlaster::translateWithChildren(
     // ---- ITE over PBV ------------------------------------------------------
     case Kind::ITE:
     {
-      if (original.getType().isPbv())
+      if (original.getType().isPbv()
+          || (d_bvDirect && original.getType().isBitVector()))
       {
         // ITE(cond, t2, t3) with PBV branches: just rebuild over Int translations
         returnNode = d_nm->mkNode(Kind::ITE,
@@ -1845,6 +2069,10 @@ Node PIntBlaster::translateWithChildren(
     {
       // Verify we have not missed any PBV operator
       Assert(theory::kindToTheoryId(oldKind) != THEORY_PBV);
+      // In direct mode the caller checked bvDirectSupports first, so no
+      // BV-typed operator should reach here either.
+      Assert(!d_bvDirect || !original.getType().isBitVector()
+             || oldKind == Kind::APPLY_UF);
 
       TypeNode resultType;
       if (original.getType().isBitVector())
@@ -2176,6 +2404,69 @@ void PIntBlaster::detectSelfSquaring(Node n, std::vector<TrustNode>& lemmas)
 // ============================================================================
 // reconstructNode
 // ============================================================================
+
+Kind PIntBlaster::bvKindToPbv(Kind k)
+{
+  switch (k)
+  {
+    case Kind::BITVECTOR_AND: return Kind::PBV_AND;
+    case Kind::BITVECTOR_OR: return Kind::PBV_OR;
+    case Kind::BITVECTOR_XOR: return Kind::PBV_XOR;
+    case Kind::BITVECTOR_NOT: return Kind::PBV_NOT;
+    case Kind::BITVECTOR_ADD: return Kind::PBV_ADD;
+    case Kind::BITVECTOR_SUB: return Kind::PBV_SUB;
+    case Kind::BITVECTOR_MULT: return Kind::PBV_MULT;
+    case Kind::BITVECTOR_NEG: return Kind::PBV_NEG;
+    case Kind::BITVECTOR_UDIV: return Kind::PBV_UDIV;
+    case Kind::BITVECTOR_UREM: return Kind::PBV_UREM;
+    case Kind::BITVECTOR_SHL: return Kind::PBV_SHL;
+    case Kind::BITVECTOR_LSHR: return Kind::PBV_LSHR;
+    case Kind::BITVECTOR_ASHR: return Kind::PBV_ASHR;
+    case Kind::BITVECTOR_CONCAT: return Kind::PBV_CONCAT;
+    case Kind::BITVECTOR_EXTRACT: return Kind::PBV_EXTRACT;
+    case Kind::BITVECTOR_ZERO_EXTEND: return Kind::PBV_ZERO_EXTEND;
+    case Kind::BITVECTOR_SIGN_EXTEND: return Kind::PBV_SIGN_EXTEND;
+    case Kind::BITVECTOR_ULT: return Kind::PBV_ULT;
+    case Kind::BITVECTOR_ULE: return Kind::PBV_ULE;
+    case Kind::BITVECTOR_UGT: return Kind::PBV_UGT;
+    case Kind::BITVECTOR_UGE: return Kind::PBV_UGE;
+    case Kind::BITVECTOR_SLT: return Kind::PBV_SLT;
+    case Kind::BITVECTOR_SLE: return Kind::PBV_SLE;
+    case Kind::BITVECTOR_SGT: return Kind::PBV_SGT;
+    case Kind::BITVECTOR_SGE: return Kind::PBV_SGE;
+    default: return Kind::UNDEFINED_KIND;
+  }
+}
+
+bool PIntBlaster::bvDirectSupports(Node n)
+{
+  std::unordered_set<TNode> visited;
+  std::vector<TNode> stack{n};
+  while (!stack.empty())
+  {
+    TNode cur = stack.back();
+    stack.pop_back();
+    if (!visited.insert(cur).second) continue;
+    Kind k = cur.getKind();
+    if (theory::kindToTheoryId(k) == THEORY_BV
+        && k != Kind::CONST_BITVECTOR
+        && bvKindToPbv(k) == Kind::UNDEFINED_KIND)
+    {
+      return false;
+    }
+    // A quantifier over a bit-vector sort would need bound kappas; the
+    // direct mode is for the quantifier-free workload.
+    if ((k == Kind::FORALL || k == Kind::EXISTS))
+    {
+      for (const Node& bv : cur[0])
+      {
+        if (bv.getType().isBitVector()) return false;
+      }
+    }
+    for (TNode c : cur) stack.push_back(c);
+  }
+  return true;
+}
 
 Node PIntBlaster::reconstructNode(Node originalNode,
                                   TypeNode resultType,

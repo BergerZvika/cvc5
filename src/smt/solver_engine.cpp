@@ -42,6 +42,9 @@
 #include "options/theory_options.h"
 #include "preprocessing/passes/synth_rew_rules.h"
 #include "printer/printer.h"
+#include "smt/print_benchmark.h"
+#include "options/arith_options.h"
+#include <fstream>
 #include "proof/unsat_core.h"
 #include "prop/prop_engine.h"
 #include "smt/abduction_solver.h"
@@ -892,6 +895,15 @@ Result SolverEngine::checkSatInternal(const std::vector<Node>& assumptions)
     }
   }
 
+  // --check-lemmas: the lemmas recorded during this check-sat are tested
+  // (or dumped) by runPendingLemmaCheck, which the check-sat command calls in
+  // place of printing the answer -- under this option the answer to the input
+  // formula is suppressed and the verdict on the lemmas is the only output.
+  // Every answer is checked, not only UNSAT, so that output always appears.
+  if (d_env->getOptions().smt.checkLemmas != options::CheckLemmasMode::NONE)
+  {
+    d_lemmaCheckPending = true;
+  }
   // Check that SAT results generate a model correctly.
   if (d_env->getOptions().smt.checkModels)
   {
@@ -1747,6 +1759,362 @@ UnsatCore SolverEngine::getUnsatCoreInternal(bool isInternal)
   }
   std::vector<Node> core = d_ucManager->getUnsatCore(isInternal);
   return UnsatCore(core);
+}
+
+void SolverEngine::checkLemmas()
+{
+  const std::vector<Node>& lemmas = d_env->getLemmasForCheck();
+  options::CheckLemmasMode mode = d_env->getOptions().smt.checkLemmas;
+  bool doDump = mode == options::CheckLemmasMode::DUMP
+                || mode == options::CheckLemmasMode::BOTH;
+  bool doCheck = mode == options::CheckLemmasMode::CHECK
+                 || mode == options::CheckLemmasMode::BOTH;
+  if (lemmas.empty())
+  {
+    d_env->verbose(1) << "SolverEngine::checkLemmas(): no lemmas recorded"
+                      << std::endl;
+    if (doCheck)
+    {
+      // the empty conjunction is trivially satisfiable
+      *d_env->getOptions().base.out << "sat" << std::endl
+                                    << "lemmas ok (0 checked)" << std::endl;
+    }
+    return;
+  }
+  NodeManager* nm = d_env->getNodeManager();
+  d_env->verbose(1) << "SolverEngine::checkLemmas(): " << lemmas.size()
+                    << " lemmas recorded" << std::endl;
+
+  // ---- dump: the two tests as push/pop blocks, expected answers in comments
+  if (doDump)
+  {
+    std::string fname = d_env->getOptions().smt.checkLemmasFile;
+    if (fname.empty())
+    {
+      const std::string& in = d_env->getOptions().driver.filename;
+      fname = (in.empty() || in == "<stdin>") ? "lemmas.smt2"
+                                              : in + ".lemmas.smt2";
+    }
+    std::ofstream out(fname);
+    if (!out)
+    {
+      throw Exception("--check-lemmas: cannot open " + fname + " for writing");
+    }
+    // Internal skolems print as `@purify_5`, `@div_...`; symbols starting
+    // with `@` or `.` are reserved in SMT-LIB and cvc5 refuses to re-parse
+    // them. Rename every such free symbol to a plain constant of the same
+    // sort (`sk_purify_5`) in the dumped copy.
+    std::vector<Node> dumpLemmas;
+    {
+      std::unordered_set<Node> symset;
+      for (const Node& lem : lemmas)
+      {
+        expr::getSymbols(lem, symset);
+      }
+      std::vector<Node> from, to;
+      for (const Node& sym : symset)
+      {
+        std::string name = sym.hasName() ? sym.getName() : "";
+        if (!name.empty() && (name[0] == '@' || name[0] == '.'))
+        {
+          std::string clean = "sk_" + name.substr(1);
+          for (char& ch : clean)
+          {
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_')
+            {
+              ch = '_';
+            }
+          }
+          from.push_back(sym);
+          to.push_back(NodeManager::mkDummySkolem(
+              clean, sym.getType(), "", SkolemFlags::SKOLEM_EXACT_NAME));
+        }
+      }
+      auto clean = [&](const Node& x) {
+        return from.empty()
+                   ? x
+                   : x.substitute(from.begin(), from.end(), to.begin(), to.end());
+      };
+      for (const Node& lem : lemmas)
+      {
+        dumpLemmas.push_back(clean(lem));
+      }
+    }
+    smt::PrintBenchmark pb(nm, Printer::getPrinter(out));
+    out << ";; " << lemmas.size()
+        << " lemmas recorded by --check-lemmas during solving of "
+        << d_env->getOptions().driver.filename << std::endl;
+    out << ";; Test 1 (consistency): all lemmas together, expected sat."
+        << std::endl;
+    out << ";; Test 2 (validity): each lemma negated, expected unsat; sat "
+           "means that lemma is NOT a theorem (the model is a counterexample)."
+        << std::endl;
+    out << "(set-logic ALL)" << std::endl;
+    out << "(set-option :incremental true)" << std::endl;
+    out << "(set-option :produce-models true)" << std::endl;
+    std::vector<Node> noDefs;
+    pb.printDeclarationsFrom(out, out, noDefs, dumpLemmas);
+    out << ";; ---- test 1: consistency (expected sat)" << std::endl;
+    out << "(push 1)" << std::endl;
+    for (const Node& lem : dumpLemmas)
+    {
+      out << "(assert " << lem << ")" << std::endl;
+    }
+    out << "(check-sat)" << std::endl << "(pop 1)" << std::endl;
+    out << ";; ---- test 2: validity, one block per lemma (expected unsat)"
+        << std::endl;
+    for (size_t i = 0, n = lemmas.size(); i < n; ++i)
+    {
+      out << ";; lemma " << (i + 1) << std::endl;
+      out << "(push 1)" << std::endl;
+      out << "(assert (not " << dumpLemmas[i] << "))" << std::endl;
+      out << "(check-sat)" << std::endl << "(pop 1)" << std::endl;
+    }
+    out.close();
+    d_env->verbose(1) << "SolverEngine::checkLemmas(): wrote " << fname
+                      << std::endl;
+  }
+
+  if (!doCheck)
+  {
+    return;
+  }
+
+  // ---- check: a subsolver whose EXP solver emits NO axioms, only model-value
+  // refinement (--arith-exp-value-only), so that no lemma -- not even an
+  // always-on one -- can vouch for its own instance: to refute (not L) the
+  // subsolver could otherwise just re-emit L. Every 'sat' it returns is a
+  // genuine counter-model, evaluated exactly.
+  // Start from default options, NOT a copy of the solving options: those
+  // turn on preprocessing passes (e.g. --analyze-exp-instances) that rewrite
+  // the lemmas or add facts of their own, so the subsolver would no longer be
+  // testing the recorded lemmas alone.
+  Options subOpts;
+  subOpts.write_smt().checkLemmas = options::CheckLemmasMode::NONE;
+  subOpts.write_smt().checkModels = false;
+  subOpts.write_smt().produceModels = true;
+  subOpts.write_arith().expValueOnly = true;
+  subOpts.write_arith().expLemmasMode = "none";
+  subOpts.write_arith().expNegRecipMode = options::ExpNegRecipMode::OFF;
+  subOpts.write_arith().expBoundingMode = options::ExpBoundingMode::NONE;
+  subOpts.write_arith().expPhasing = false;
+  subOpts.write_arith().expMonGeneral = false;
+  subOpts.write_arith().expNegOneParity = false;
+  subOpts.write_arith().expHalvingDepth = 0;
+  theory::SubsolverSetupInfo ssi(*d_env.get(), subOpts);
+  uint64_t tlim = d_env->getOptions().smt.checkLemmasTimeout;
+  bool needsTimeout = tlim > 0;
+  size_t unknowns = 0;
+
+  // test 2, stage A: validity of each lemma by exact evaluation, run first
+  // because it is cheap and exact.
+  //
+  // Stage A -- exact evaluation on a grid of small values. Every free symbol
+  // of the lemma (Int/Real/Bool; anything else skips the stage) is assigned
+  // each value in [-B, B], the lemma is instantiated and rewritten, and a
+  // result of `false` is a counterexample. This needs no search at all and
+  // is exact (`**`, div, mod all fold on constants), and every EXP soundness
+  // bug found so far -- sym3 at s=2,t=1, the bnd3 converse at s=2,t=-1 --
+  // dies on this grid. The grid is capped at a few thousand points; with
+  // many variables the bound shrinks.
+  //
+  // Stage B -- the value-only subsolver on (not lemma), for a wider search.
+  const int64_t gridCap = 4096;
+  for (size_t i = 0, n = lemmas.size(); i < n; ++i)
+  {
+    Node lem = lemmas[i];
+    std::unordered_set<Node> symset;
+    expr::getSymbols(lem, symset);
+    std::vector<Node> vars(symset.begin(), symset.end());
+    // ---- stage A
+    bool gridOk = true;
+    for (const Node& v : vars)
+    {
+      TypeNode vt = v.getType();
+      if (!vt.isInteger() && !vt.isReal() && !vt.isBoolean())
+      {
+        gridOk = false;
+        break;
+      }
+    }
+    if (gridOk && !vars.empty())
+    {
+      size_t nv = vars.size();
+      // choose the bound B so that (2B+1)^nv <= gridCap, B >= 1
+      int64_t B = 3;
+      while (B > 1)
+      {
+        double pts = 1;
+        for (size_t j = 0; j < nv; ++j) pts *= (2 * B + 1);
+        if (pts <= gridCap) break;
+        --B;
+      }
+      std::vector<Node> gv(nv);
+      std::vector<int64_t> idx(nv, -B);
+      bool done = false;
+      Node bad;
+      while (!done)
+      {
+        for (size_t j = 0; j < nv; ++j)
+        {
+          TypeNode vt = vars[j].getType();
+          gv[j] = vt.isBoolean() ? nm->mkConst(idx[j] % 2 != 0)
+                  : vt.isInteger() ? nm->mkConstInt(Rational(idx[j]))
+                                   : nm->mkConstReal(Rational(idx[j]));
+        }
+        bool admitted = true;
+        Node inst = admitted ? lem.substitute(
+                        vars.begin(), vars.end(), gv.begin(), gv.end())
+                             : Node::null();
+        Node ev =
+            admitted ? d_env->getRewriter()->rewrite(inst) : Node::null();
+        if (admitted && ev.isConst() && !ev.getConst<bool>())
+        {
+          bad = inst;
+          std::stringstream ss;
+          ss << "--check-lemmas: lemma [" << (i + 1) << "] of " << n
+             << " is NOT VALID: " << lem << std::endl
+             << "  counterexample (found by evaluation):";
+          for (size_t j = 0; j < nv; ++j)
+          {
+            ss << std::endl << "    " << vars[j] << " = " << gv[j];
+          }
+          throw Exception(ss.str());
+        }
+        // advance the odometer
+        size_t j = 0;
+        while (j < nv)
+        {
+          if (++idx[j] <= B) break;
+          idx[j] = -B;
+          ++j;
+        }
+        done = (j == nv);
+      }
+    }
+  }
+
+  // test 1: consistency. Its answer is the answer printed for the run.
+  Result consistency;
+  {
+    Node all = nm->mkAnd(lemmas);
+    Result r = theory::checkWithSubsolver(all, ssi, needsTimeout, tlim);
+    consistency = r;
+    d_env->verbose(1) << "SolverEngine::checkLemmas(): consistency: " << r
+                      << std::endl;
+    if (r.getStatus() == Result::UNSAT)
+    {
+      std::stringstream ss;
+      ss << "--check-lemmas: the " << lemmas.size()
+         << " lemmas recorded during solving are INCONSISTENT (their "
+            "conjunction is unsat), so at least one of them is wrong. Lemmas:";
+      for (size_t i = 0, n = lemmas.size(); i < n; ++i)
+      {
+        ss << std::endl << "  [" << (i + 1) << "] " << lemmas[i];
+      }
+      throw Exception(ss.str());
+    }
+    if (r.getStatus() != Result::SAT)
+    {
+      ++unknowns;
+      d_env->verbose(1) << "--check-lemmas: consistency test inconclusive ("
+                        << r << ")" << std::endl;
+    }
+  }
+
+  // test 2, stage B: the value-only subsolver on (not lemma)
+  for (size_t i = 0, n = lemmas.size(); i < n; ++i)
+  {
+    Node lem = lemmas[i];
+    std::unordered_set<Node> symset;
+    expr::getSymbols(lem, symset);
+    std::vector<Node> vars(symset.begin(), symset.end());
+    std::vector<Node> vals;
+    std::vector<Node> query{lem.notNode()};
+    Result r = theory::checkWithSubsolver(
+        nm->mkAnd(query), vars, vals, ssi, needsTimeout, tlim);
+    d_env->verbose(1) << "SolverEngine::checkLemmas(): validity of [" << (i + 1)
+                      << "] " << lem << " : " << r << std::endl;
+    if (r.getStatus() == Result::SAT)
+    {
+      // Trust the subsolver's model only if it really falsifies the lemma
+      // under exact evaluation: substitute the reported values and rewrite.
+      // A model that does not (seen with purification skolems standing in
+      // for eliminated operators) is reported as inconclusive, not as a bug.
+      bool confirmed = false;
+      if (vals.size() == vars.size())
+      {
+        bool allConst = true;
+        for (const Node& v : vals)
+        {
+          allConst = allConst && v.isConst();
+        }
+        if (allConst)
+        {
+          Node inst = lem.substitute(
+              vars.begin(), vars.end(), vals.begin(), vals.end());
+          Node ev = d_env->getRewriter()->rewrite(inst);
+          confirmed = ev.isConst() && !ev.getConst<bool>();
+        }
+      }
+      if (confirmed)
+      {
+        std::stringstream ss;
+        ss << "--check-lemmas: lemma [" << (i + 1) << "] of " << n
+           << " is NOT VALID: " << lem << std::endl
+           << "  counter-model:";
+        for (size_t j = 0; j < vars.size() && j < vals.size(); ++j)
+        {
+          ss << std::endl << "    " << vars[j] << " = " << vals[j];
+        }
+        throw Exception(ss.str());
+      }
+      ++unknowns;
+      d_env->verbose(1) << "--check-lemmas: validity of lemma [" << (i + 1)
+                        << "]: subsolver said sat but its model does not "
+                           "falsify the lemma under evaluation; inconclusive"
+                        << std::endl;
+      continue;
+    }
+    if (r.getStatus() != Result::UNSAT)
+    {
+      ++unknowns;
+      d_env->verbose(1) << "--check-lemmas: validity of lemma [" << (i + 1)
+                        << "] inconclusive (" << r << "): " << lem
+                        << std::endl;
+    }
+  }
+  d_env->verbose(1) << "SolverEngine::checkLemmas(): done, " << lemmas.size()
+                    << " lemmas, " << unknowns << " inconclusive"
+                    << std::endl;
+  // The output of the run: the answer on the lemma formula (the conjunction
+  // of all recorded lemmas), then the verdict -- every lemma passed and every
+  // sub-query was conclusive -> "lemmas ok"; nothing failed but some
+  // sub-query returned unknown / timed out -> "lemmas unknown". A failure
+  // never reaches here: an unsat conjunction or an invalid lemma raised above.
+  std::ostream& out = *d_env->getOptions().base.out;
+  out << (consistency.getStatus() == Result::SAT ? "sat" : "unknown")
+      << std::endl;
+  if (unknowns == 0)
+  {
+    out << "lemmas ok (" << lemmas.size() << " checked)" << std::endl;
+  }
+  else
+  {
+    out << "lemmas unknown (" << lemmas.size() << " checked, " << unknowns
+        << " of " << (lemmas.size() + 1)
+        << " sub-queries inconclusive, none failed)" << std::endl;
+  }
+}
+
+void SolverEngine::runPendingLemmaCheck()
+{
+  if (!d_lemmaCheckPending)
+  {
+    return;
+  }
+  d_lemmaCheckPending = false;
+  checkLemmas();
 }
 
 void SolverEngine::checkUnsatCore()

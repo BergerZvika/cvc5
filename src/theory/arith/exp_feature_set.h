@@ -37,6 +37,20 @@ namespace theory {
 namespace arith {
 
 /**
+ * Which of the two options a list is being parsed for. The two share several
+ * token names but not all of them -- 'fuse', for one, exists only as a lemma
+ * -- so an aggregate such as 'pbv' must expand differently depending on which
+ * option it was written on.
+ */
+enum class ExpFeatureAxis
+{
+  /** --arith-exp-rewrites */
+  REWRITES,
+  /** --arith-exp-lemmas */
+  LEMMAS,
+};
+
+/**
  * A parsed --arith-exp-rewrites / --arith-exp-lemmas value: the set of
  * feature names the user selected, plus the aggregates they imply.
  */
@@ -44,23 +58,25 @@ class ExpFeatureSet
 {
  public:
   ExpFeatureSet() = default;
-  /** Parse a comma/space-separated list. Unknown tokens are kept as-is so a
-   * typo simply never matches rather than silently enabling something. */
-  explicit ExpFeatureSet(const std::string& spec);
+  /** Parse a comma/space-separated list for the given option. Unknown tokens
+   * are kept as-is so a typo simply never matches rather than silently
+   * enabling something. */
+  ExpFeatureSet(const std::string& spec, ExpFeatureAxis axis);
 
   /** Is `name` selected, either directly or via an aggregate? */
   bool has(const std::string& name) const;
-  /** Was an aggregate ('all' / 'all-lemmas') given? */
+  /** Was the 'all' aggregate given? */
   bool hasAll() const { return d_all; }
   /** True when nothing at all was selected. */
   bool empty() const { return d_names.empty() && !d_all; }
 
  private:
   std::set<std::string> d_names;
-  /** 'all' was given: every feature is on. */
+  /** 'all' was given. On the lemma axis that means every family without
+   * exception; on the rewrite axis every schema except 'unroll'. */
   bool d_all = false;
-  /** 'all-lemmas' was given: the five SwInE families are on. */
-  bool d_allLemmas = false;
+  /** Which option this list was parsed for; 'all' and 'pbv' expand per axis. */
+  ExpFeatureAxis d_axis = ExpFeatureAxis::LEMMAS;
 };
 
 }  // namespace arith

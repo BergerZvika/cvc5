@@ -78,8 +78,28 @@ libcvc5_add_sources(
   preprocessing/passes/int_order_facts.h
   preprocessing/passes/exp_mod_pow.cpp
   preprocessing/passes/exp_mod_pow.h
+  preprocessing/passes/arith_witness_search.cpp
+  preprocessing/passes/arith_witness_search.h
+  preprocessing/passes/arith_pow2_norm.cpp
+  preprocessing/passes/arith_pow2_norm.h
+  preprocessing/passes/arith_fermat_vacuity.cpp
+  preprocessing/passes/arith_fermat_vacuity.h
+  preprocessing/passes/exp_divisibility.cpp
+  preprocessing/passes/exp_divisibility.h
+  preprocessing/passes/exp_pow_fuse.cpp
+  preprocessing/passes/exp_pow_fuse.h
+  preprocessing/passes/exp_prod_divides.cpp
+  preprocessing/passes/exp_prod_divides.h
+  preprocessing/passes/arith_rat_identity.cpp
+  preprocessing/passes/arith_rat_identity.h
+  preprocessing/passes/exp_base_order.cpp
+  preprocessing/passes/exp_base_order.h
+  preprocessing/passes/exp_negone_parity.cpp
+  preprocessing/passes/exp_negone_parity.h
   preprocessing/passes/pbv_mod_reducer.cpp
   preprocessing/passes/pbv_mod_reducer.h
+  preprocessing/passes/pbv_div_lemmas.cpp
+  preprocessing/passes/pbv_div_lemmas.h
   preprocessing/passes/pbv_mw.cpp
   preprocessing/passes/pbv_mw.h
   preprocessing/passes/pbv_to_int.cpp

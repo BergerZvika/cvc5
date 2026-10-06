@@ -59,9 +59,6 @@ class Pow2ModReducer : protected EnvObj
   /** Collect width-ordering facts from every assertion. Call before reduce(). */
   void harvest(const std::vector<Node>& assertions);
 
-  /** Scan the assertions for `x < 2^p` range atoms and record p for x. */
-  void harvestVarWidths(const std::vector<Node>& assertions);
-
   /** Rewrite n, deleting redundant `mod 2^k` subterms. */
   Node reduce(Node n);
 
@@ -139,13 +136,6 @@ class Pow2ModReducer : protected EnvObj
   std::unordered_map<Node, Node> d_cache;
   /** x -> width bound, or a null Node meaning "no bound derivable". */
   std::unordered_map<Node, Node> d_widthCache;
-  /**
-   * Width of a bare symbol, read off the RANGE constraints (`x < 2^p`) that the
-   * translation emits instead of keeping the width inside the term. Populated
-   * only under --pbv-mod-var-widths; see harvestVarWidths.
-   */
-  std::unordered_map<Node, Node> d_varWidth;
-
   /** Run the original cases 1-5 (modes base, all). */
   bool d_base;
   /** Run the cav26 groups A and B (modes cav26, all). */

@@ -20,6 +20,8 @@
 #define CVC5__SMT__ENV_H
 
 #include <memory>
+#include <unordered_set>
+#include <vector>
 
 #include "context/cdhashset.h"
 #include "options/options.h"
@@ -141,6 +143,15 @@ class Env
 
   /** Get a reference to the top-level substitution map */
   theory::TrustSubstitutionMap& getTopLevelSubstitutions();
+
+  /**
+   * --check-lemmas: record a lemma sent by a theory solver so it can be
+   * checked (or dumped) after check-sat. Duplicates are dropped; recording
+   * order is kept. Only the EXP solver records at present.
+   */
+  void recordLemmaForCheck(const Node& lem);
+  /** The lemmas recorded by recordLemmaForCheck, in recording order. */
+  const std::vector<Node>& getLemmasForCheck() const { return d_checkLemmas; }
 
   /** Get the options object (const version only) owned by this Env. */
   const Options& getOptions() const;
@@ -382,6 +393,9 @@ class Env
   std::unique_ptr<theory::Evaluator> d_eval;
   /** The top level substitutions */
   std::unique_ptr<theory::TrustSubstitutionMap> d_topLevelSubs;
+  /** --check-lemmas: recorded lemmas (in order) and their set for dedup. */
+  std::vector<Node> d_checkLemmas;
+  std::unordered_set<Node> d_checkLemmasSet;
   /**
    * The logic we're in. This logic may be an extension of the logic set by the
    * user, which may be different from the user-provided logic due to the

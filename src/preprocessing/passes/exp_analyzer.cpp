@@ -256,7 +256,14 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
   // all instances are related by b^(S+a) = b^(a-p) * b^(S+p) for the pivot
   // offset p. Pivoting on the SMALLEST offset makes every a-p >= 0, so the
   // factor b^(a-p) is always a non-negative power and every member rewrites
-  // via MULT (never division). The base may be:
+  // via MULT (never division).
+  //
+  // The identity needs BOTH exponents to be non-negative (unless b is 1 or
+  // -1): for |b| >= 2 a negative power is 0, so with S+p = -1 and S+a = 0 it
+  // would turn b^0 = 1 into b * b^(-1) = 0. A member is therefore rewritten
+  // only when the smaller of its own and the pivot's exponent is entailed
+  // non-negative by the assertions (IntOrderFacts); otherwise it is left
+  // alone. The base may be:
   //   * an integer constant c (any sign): factor is the constant c^(a-p);
   //   * a symbolic term: factor is b^(a-p) built as a product of (a-p) copies
   //     of b (capped to keep the product small).
@@ -290,12 +297,25 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
   // exponent gap cannot blow the term up. Constant bases have no such limit
   // (their factor is a single constant c^d) beyond the sanity bound below.
   const Integer kMaxSymChain(256);
+  IntOrderFacts facts(d_preprocContext->getEnv());
+  {
+    std::vector<Node> cur;
+    for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+    {
+      cur.push_back((*assertionsToPreprocess)[i]);
+    }
+    facts.harvest(cur);
+  }
   std::unordered_map<Node, Node> sub;  // node-to-replace -> replacement
   for (auto& [key, members] : groups)
   {
     if (members.size() < 2) continue;
     const Node& base = key.first;
     const bool constBase = base.isConst();
+    // b = 1 or b = -1: b^(S+a) = b^(a-p) * b^(S+p) holds for every exponent
+    // (1 always, -1 by parity), so no sign condition is needed.
+    const bool unitBase =
+        constBase && base.getConst<Rational>().abs() == Rational(1);
     // Pivot choice (see commonPivot above):
     //  * default: the member with the SMALLEST exponent offset (ties -> most
     //    occurrences). Every other member is then a LARGER power reached by
@@ -334,6 +354,11 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
       // In the default (smallest) pivot mode d > 0 always; with commonPivot d
       // may be negative (smaller power -> divide down).
       Assert(commonPivot || d.sgn() > 0);
+      // The smaller exponent of the pair must be entailed non-negative.
+      if (!unitBase && !facts.nonNeg(d.sgn() > 0 ? pivot[1] : m[1]))
+      {
+        continue;
+      }
       Integer ad = d.getNumerator().abs();
       // Build the factor b^|d| (a constant for a constant base, a product of
       // |d| copies for a symbolic base, so the rewrite stays in-theory).

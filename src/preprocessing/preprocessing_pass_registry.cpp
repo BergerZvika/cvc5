@@ -32,10 +32,20 @@
 #include "preprocessing/passes/bv_intro_pow2.h"
 #include "preprocessing/passes/bv_to_bool.h"
 #include "preprocessing/passes/bv_to_int.h"
+#include "preprocessing/passes/pbv_div_lemmas.h"
 #include "preprocessing/passes/pbv_mw.h"
 #include "preprocessing/passes/pbv_to_int.h"
 #include "preprocessing/passes/exp_analyzer.h"
 #include "preprocessing/passes/exp_mod_pow.h"
+#include "preprocessing/passes/arith_fermat_vacuity.h"
+#include "preprocessing/passes/arith_witness_search.h"
+#include "preprocessing/passes/arith_pow2_norm.h"
+#include "preprocessing/passes/exp_divisibility.h"
+#include "preprocessing/passes/arith_rat_identity.h"
+#include "preprocessing/passes/exp_base_order.h"
+#include "preprocessing/passes/exp_negone_parity.h"
+#include "preprocessing/passes/exp_pow_fuse.h"
+#include "preprocessing/passes/exp_prod_divides.h"
 #include "preprocessing/passes/extended_rewriter_pass.h"
 #include "preprocessing/passes/ff_bitsum.h"
 #include "preprocessing/passes/ff_disjunctive_bit.h"
@@ -134,10 +144,20 @@ PreprocessingPassRegistry::PreprocessingPassRegistry()
   registerPassInfo("global-negate", callCtor<GlobalNegate>);
   registerPassInfo("int-to-bv", callCtor<IntToBV>);
   registerPassInfo("bv-to-int", callCtor<BVToInt>);
+  registerPassInfo("pbv-div-lemmas", callCtor<PbvDivLemmas>);
   registerPassInfo("pbv-mw", callCtor<PbvMw>);
   registerPassInfo("pbv-to-int", callCtor<PBVToInt>);
   registerPassInfo("exp-analyzer", callCtor<ExpAnalyzer>);
   registerPassInfo("exp-mod-pow", callCtor<ExpModPow>);
+  registerPassInfo("arith-rat-identity", callCtor<ArithRatIdentity>);
+  registerPassInfo("exp-base-order", callCtor<ExpBaseOrder>);
+  registerPassInfo("exp-negone-parity", callCtor<ExpNegOneParity>);
+  registerPassInfo("exp-divisibility", callCtor<ExpDivisibility>);
+  registerPassInfo("exp-prod-divides", callCtor<ExpProdDivides>);
+  registerPassInfo("exp-pow-fuse", callCtor<ExpPowFuse>);
+  registerPassInfo("arith-fermat-vacuity", callCtor<ArithFermatVacuity>);
+  registerPassInfo("arith-witness-search", callCtor<ArithWitnessSearch>);
+  registerPassInfo("arith-pow2-norm", callCtor<ArithPow2Norm>);
   registerPassInfo("ff-bitsum", callCtor<FfBitsum>);
   registerPassInfo("ff-disjunctive-bit", callCtor<FfDisjunctiveBit>);
   registerPassInfo("learned-rewrite", callCtor<LearnedRewrite>);

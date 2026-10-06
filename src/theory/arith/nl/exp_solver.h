@@ -21,6 +21,9 @@
 
 #include "expr/node.h"
 #include "smt/env_obj.h"
+#include "options/arith_options.h"
+#include "options/smt_options.h"
+#include "theory/arith/exp_feature_set.h"
 #include "theory/theory_state.h"
 #include "util/integer.h"
 
@@ -112,6 +115,20 @@ class ExpSolver : protected EnvObj
   NodeSet d_phaseEmitted;
   //-------------------------------------------- end phasing
   InferenceManager& d_im;
+  /**
+   * The single exit for every lemma this solver sends. Forwards to
+   * d_im.addPendingLemma and, under --check-lemmas, records the lemma in
+   * the Env so it can be checked or dumped after check-sat.
+   */
+  template <typename... Args>
+  void addExpLemma(const Node& lem, Args&&... args)
+  {
+    if (options().smt.checkLemmas != options::CheckLemmasMode::NONE)
+    {
+      d_env.recordLemmaForCheck(lem);
+    }
+    d_im.addPendingLemma(lem, std::forward<Args>(args)...);
+  }
   /** Reference to the non-linear model object */
   NlModel& d_model;
   /** commonly used terms */
@@ -123,6 +140,14 @@ class ExpSolver : protected EnvObj
   Node d_negone;
 
   NodeSet d_initRefine;
+  /**
+   * EXP terms created by the --arith-exp-halving predecessor chain. They enter
+   * d_exps like any other term, so without this record each of them would be
+   * unrolled again and the chain would never bottom out. Both the term as
+   * built and its rewritten form are recorded, since it is the rewritten form
+   * that comes back in d_exps.
+   */
+  NodeSet d_halveIntroduced;
   /** all exp terms
    * Cleared at each last call effort check.
    * */
@@ -166,8 +191,33 @@ class ExpSolver : protected EnvObj
    * unsound. Emitted only when the fused term already exists in the problem
    * (or folds to a constant), so it introduces nothing into the term graph and
    * cannot diverge.
+   *
+   * With byModel (the 'fuse-model' token), a pair whose syntactic sum names no
+   * EXP term is matched instead against an existing term exp(s3,t3) whose
+   * candidate model has s3 = s1 and t3 = t1 + t2, and the lemma carries those
+   * equalities in its antecedent:
+   *   s1 = s2 /\ s1 = s3 /\ t1 >= 0 /\ t2 >= 0 /\ t3 = t1 + t2
+   *     => exp(s1,t1) * exp(s2,t2) = exp(s3,t3)
+   * This relates exponents that are equal but not syntactically so, e.g.
+   * (div (* n (+ n 1)) 2) and n + (div (* (- n 1) n) 2). It still introduces
+   * no term.
    */
-  void checkFuseRefine();
+  void checkFuseRefine(bool byModel);
+  /**
+   * Same-exponent fusion, as a full-refinement lemma family:
+   *   exp(s,a) * exp(t,a) = exp(s*t, a)
+   * Valid unguarded under `**`, unlike the same-base fuse. Like that one it
+   * is its own scan over all pairs and only fires when the fused term already
+   * exists, so it introduces no new terms.
+   */
+  void checkFuseBaseRefine();
+  /**
+   * neg-one as a full-refinement lemma: s = -1 /\ t < 0 => exp(s,t) =
+   * exp(s,-t), emitted only when the candidate model satisfies the
+   * antecedent. Moved out of initial refine because it introduces the mirror
+   * term exp(s,-t).
+   */
+  void checkNegOneRefine(Node n, const Integer& ms, const Integer& mt);
   /**
    * Emit symmetry lemmas for the model-violating term n in the full-refine
    * loop, restricted to the lemmas whose antecedent holds in the model (so
@@ -187,6 +237,18 @@ class ExpSolver : protected EnvObj
                          const Integer& mv);
 
   void addBoundingLemmas(Node i, std::vector<Node>& conj);
+  /**
+   * The effective bounding placement, resolving --arith-exp-bounding against
+   * the 'bounding' token of --arith-exp-lemmas: the option's value when the
+   * user gave it explicitly, otherwise 'both' if the token is selected and
+   * 'none' if it is not.
+   */
+  options::ExpBoundingMode getBoundingMode(const ExpFeatureSet& lsel) const;
+  /**
+   * Is SwInE phasing on? Either via the standalone --arith-exp-phasing or via
+   * the 'phasing' token of --arith-exp-lemmas; the two are OR-ed.
+   */
+  bool isPhasingOn() const;
   /** Emit the prime lemma for exp(s,t) given its model values, if any. */
   void checkPrimeLemma(Node n, const Integer& model_s, const Integer& expx);
   /** Emit the induction lemma relating same-base terms n and m, if any. */

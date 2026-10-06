@@ -35,7 +35,8 @@ PIAndSolver::PIAndSolver(Env& env, InferenceManager& im, NlModel& model)
       d_im(im),
       d_model(model),
       d_iandUtils(env.getNodeManager()),
-      d_initRefine(userContext())
+      d_initRefine(userContext()),
+      d_complementIntroduced(userContext())
 {
   NodeManager* nm = nodeManager();
   d_false = nm->mkConst(false);
@@ -153,6 +154,108 @@ void PIAndSolver::checkInitialRefine()
       Node arg0Mod2_eq_zero = nm->mkNode(Kind::EQUAL, arg0Mod2, d_zero);
       conj.push_back(nm->mkNode(
           Kind::IMPLIES, arg0Mod2_eq_zero, piand_mod_two.eqNode(d_zero)));
+
+      // complement split (--piand-lemmas=complement):
+      //   x,y in [0,2^k)  =>  piand(k,x,y) + piand(k,x,2^k-1-y) = x
+      //
+      // Every set bit of x meets a set bit in exactly one of y and ~y, so the
+      // two conjunctions partition x between them. This is the only schema
+      // that relates a piand to the piand of the COMPLEMENT of one argument,
+      // and it is what a subset hypothesis reduces to: from `(~a | b) = ones`
+      // the int-blaster produces piand(k,b,2^k-1-a) = b-a, and the split with
+      // x:=b, y:=a then gives piand(k,a,b) = a in one step. That shape is the
+      // must-be-consistent-bits predicate of the icfb benchmarks, and without
+      // this lemma cvc5 cannot discharge it at symbolic width at all.
+      //
+      // The lemma introduces piand(k,x,2^k-1-y). Its own complement folds back
+      // to piand(k,x,y), so the chain closes rather than descending; the guard
+      // below makes that independent of how the rewriter normalises the
+      // subtraction.
+      {
+        options::PIAndLemmaMode plm = options().arith.piAndLemmaMode;
+        if ((plm == options::PIAndLemmaMode::ALL
+             || plm == options::PIAndLemmaMode::COMPLEMENT)
+            && d_complementIntroduced.find(i) == d_complementIntroduced.end())
+        {
+          Node yBar = nm->mkNode(Kind::SUB, twok_minus_one, y);
+          Node piandBar = nm->mkNode(Kind::PIAND, k, x, yBar);
+          d_complementIntroduced.insert(piandBar);
+          d_complementIntroduced.insert(rewrite(piandBar));
+          conj.push_back(nm->mkNode(
+              Kind::IMPLIES,
+              nm->mkNode(Kind::AND, x_range, y_range),
+              nm->mkNode(Kind::ADD, i, piandBar).eqNode(x)));
+        }
+      }
+
+      // constant low-mask evaluation (--piand-lemmas=mask):
+      //   piand(k, 2^j-1, y) = y mod 2^min(j,k)   for y >= 0, k >= 1
+      //
+      // The mask 2^j-1 is j low ones, so anding with it keeps exactly the low
+      // min(j,k) bits of y. The rewriter cannot fold this: its constant-
+      // argument rules ask for a constant k so they can compare against
+      // 2^k-1, and here k is symbolic. The case that matters in practice is
+      // j=1 -- `pbvand x 1` and `pbvor x 1`, i.e. bit-0 extraction, which the
+      // width-parametric MUL/UDIV/UREM lemmas are full of -- where the
+      // conclusion is the linear `y mod 2`.
+      {
+        options::PIAndLemmaMode plm = options().arith.piAndLemmaMode;
+        if (plm == options::PIAndLemmaMode::ALL
+            || plm == options::PIAndLemmaMode::MASK)
+        {
+          for (uint32_t arg = 0; arg < 2; arg++)
+          {
+            Node m = arg == 0 ? x : y;      // candidate mask
+            Node o = arg == 0 ? y : x;      // the other argument
+            if (!m.isConst())
+            {
+              continue;
+            }
+            Rational rm = m.getConst<Rational>();
+            if (!rm.isIntegral() || rm.sgn() <= 0)
+            {
+              continue;
+            }
+            Integer im = rm.getNumerator();
+            // m = 2^j - 1 iff m+1 is a power of two; j = log2(m+1).
+            Integer mp1 = im + Integer(1);
+            if (!mp1.isPow2())
+            {
+              continue;
+            }
+            // isPow2() returns the 1-based index, so j is that minus one.
+            uint32_t j = mp1.isPow2() - 1;
+            if (j == 0)
+            {
+              continue;
+            }
+            Node jN = nm->mkConstInt(Rational(Integer(j)));
+            Node twoj = nm->mkConstInt(Rational(Integer(2).pow(j)));
+            // Guarded by the full range, like the other constant-argument
+            // lemmas here: outside [0, 2^k) the low-mask reading does not
+            // determine piand.
+            Node oRange = nm->mkNode(Kind::AND,
+                                     nm->mkNode(Kind::GEQ, o, d_zero),
+                                     nm->mkNode(Kind::LT, o, twok));
+            Node oNonNeg = oRange;
+            // wide case: k >= j, the modulus is the constant 2^j
+            conj.push_back(nm->mkNode(
+                Kind::IMPLIES,
+                nm->mkNode(
+                    Kind::AND, oNonNeg, nm->mkNode(Kind::GEQ, k, jN)),
+                i.eqNode(nm->mkNode(Kind::INTS_MODULUS, o, twoj))));
+            // narrow case: 1 <= k < j, the mask covers the whole width
+            conj.push_back(nm->mkNode(
+                Kind::IMPLIES,
+                nm->mkNode(Kind::AND,
+                           oNonNeg,
+                           k_gt_0,
+                           nm->mkNode(Kind::LT, k, jN)),
+                i.eqNode(nm->mkNode(Kind::INTS_MODULUS, o, twok))));
+            break;
+          }
+        }
+      }
 
       // insert lemmas
       Node lem = conj.size() == 1 ? conj[0] : nm->mkNode(Kind::AND, conj);

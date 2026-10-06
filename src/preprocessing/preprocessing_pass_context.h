@@ -22,6 +22,9 @@
 #ifndef CVC5__PREPROCESSING__PREPROCESSING_PASS_CONTEXT_H
 #define CVC5__PREPROCESSING__PREPROCESSING_PASS_CONTEXT_H
 
+#include <utility>
+#include <vector>
+
 #include "context/cdhashset.h"
 #include "preprocessing/learned_literal_manager.h"
 #include "smt/env_obj.h"
@@ -132,6 +135,22 @@ class PreprocessingPassContext : protected EnvObj
   /** Null when no such query was built. */
   Node getPbvTypeCheckQuery() const { return d_pbvTypeCheckQuery; }
 
+  /**
+   * --solve-bv-as-int=pbv-pipeline: the bv-to-int pass lifts each BV
+   * variable x to a fresh PBV variable pbv_x and leaves the translation to
+   * the later pbv-to-int pass, which is the only place chi(pbv_x) is known.
+   * bv-to-int records the pairs here and pbv-to-int reads them back to add
+   * the model definition x := ((_ nat2bv k) chi(pbv_x)).
+   */
+  void registerLiftedBvVar(const Node& bvVar, const Node& pbvVar)
+  {
+    d_liftedBvVars.emplace_back(bvVar, pbvVar);
+  }
+  const std::vector<std::pair<Node, Node>>& getLiftedBvVars() const
+  {
+    return d_liftedBvVars;
+  }
+
  private:
   /** Helper method for printing substitutions */
   void printSubstitution(const Node& lhs, const Node& rhs) const;
@@ -155,6 +174,8 @@ class PreprocessingPassContext : protected EnvObj
 
   /** See setPbvTypeCheckQuery. */
   Node d_pbvTypeCheckQuery;
+  /** See registerLiftedBvVar. */
+  std::vector<std::pair<Node, Node>> d_liftedBvVars;
 
 };  // class PreprocessingPassContext
 

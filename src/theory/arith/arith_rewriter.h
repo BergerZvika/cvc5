@@ -41,7 +41,8 @@ class ArithRewriter : public TheoryRewriter
                 OperatorElim& oe,
                 bool expertEnabled = true,
                 const std::string& expRewriteMode = "none",
-                uint64_t expRewriteUnrollBound = 2);
+                uint64_t expRewriteUnrollBound = 2,
+                const std::string& expLemmasMode = "none");
   RewriteResponse preRewrite(TNode n) override;
   RewriteResponse postRewrite(TNode n) override;
   /**
@@ -144,6 +145,14 @@ class ArithRewriter : public TheoryRewriter
   bool d_expertEnabled;
   /** Which extra EXP rewrite schemas to fire (default NONE). */
   ExpFeatureSet d_expRewriteMode;
+  /**
+   * The --arith-exp-lemmas selection. Only the 'const' and 'unroll' tokens are
+   * read from it, and they are OR-ed with the same tokens on
+   * --arith-exp-rewrites; no other rewrite schema can be selected from this
+   * axis. In particular 'fuse-base' names a lemma family there and must not
+   * turn the rewrite of the same name on.
+   */
+  ExpFeatureSet d_expLemmasMode;
   /** Upper bound for the bounded-unroll EXP rewrite. */
   uint64_t d_expRewriteUnrollBound;
 }; /* class ArithRewriter */
