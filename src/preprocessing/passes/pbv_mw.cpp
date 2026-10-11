@@ -13,8 +13,18 @@
  * See pbv_mw.h.
  *
  * ===========================================================================
- * THE RULES  (all gated by --pbv-preprocess-mw)
+ * THE RULES
  * ===========================================================================
+ *
+ * The catalogue of both kinds of rule. The CONDITIONAL ones -- every rule
+ * with a side condition -- are no longer gated by their family's --pbv-*
+ * flag: they are selected by --learned-rewrite-rules, run in the
+ * learned-rewrite-pbv pass, and their bodies are in learned_rewrite_pbv.cpp
+ * (which lists them). The --pbv-* flags below gate only the unconditional
+ * rules that remain here; the families that had none left (A/B, E, R, K)
+ * have lost their flags.
+ *
+ * A/B: --learned-rewrite-rules=preprocess-mw.
  *
  * Write EXT for either pzero_extend or psign_extend, and w(t) for the
  * symbolic width of t.  Every rule's side condition is decided by
@@ -122,7 +132,7 @@
  *        Shifting left by m drops the top m bits, and the arithmetic shift
  *        back refills them with the sign of what is now bit w-m-1.
  *
- * R. SIGNED RANGE                                 (--pbv-mw-signed-range)
+ * R. SIGNED RANGE                                 (--learned-rewrite-rules=signed-range)
  *    C = (pbvshl -1 (int_to_pbv W m)) is exactly -2^m when m + 1 <= W, and
  *    (psign_extend n x) of a p-bit x is >= -2^(p-1). When p <= m:
  *    R1  C <s sext(x),  C <=s sext(x)   ->  true
@@ -156,7 +166,7 @@
  *        or subtracts z;  (y - z) + z -> y;  0 + y -> y
  *    G6  ite(~c, a, b)          ->  ite(c, b, a)
  *
- * K. MASK FACTS                                   (--pbv-mw-mask-facts)
+ * K. MASK FACTS                                   (--learned-rewrite-rules=mask-facts)
  *    Facts read off the top-level conjuncts: M is a low mask 2^k - 1 when
  *    `((M+1) & ((M+1) - 1)) = 0` is asserted; p, q are disjoint when
  *    `p & q = 0` is; p, q are complements when `p = ~q` is.
@@ -187,6 +197,15 @@ namespace passes {
 
 PbvMw::PbvMw(PreprocessingPassContext* preprocContext)
     : PreprocessingPass(preprocContext, "pbv-mw"), d_facts(preprocContext->getEnv())
+{
+}
+
+PbvMw::PbvMw(PreprocessingPassContext* preprocContext,
+             const std::string& name,
+             const LearnedRewriteRules& cond)
+    : PreprocessingPass(preprocContext, name),
+      d_cond(cond),
+      d_facts(preprocContext->getEnv())
 {
 }
 
@@ -588,7 +607,8 @@ Node PbvMw::applyExtNorm(Node n)
   // --- T : truncation push  (--pbv-mw-trunc-push)
   // Every T rule deletes the extract and most delete the node under it, so
   // both must be admissible.
-  if (o.pbvMwTruncPush && k == Kind::PBV_EXTRACT && nc == 3
+  if ((o.pbvMwTruncPush || d_cond.d_truncPush) && k == Kind::PBV_EXTRACT
+      && nc == 3
       && n[2].isConst() && n[2].getConst<Rational>().sgn() == 0
       && admissible(n))
   {
@@ -596,36 +616,30 @@ Node PbvMw::applyExtNorm(Node n)
     Node kw = rewrite(nm->mkNode(Kind::ADD, i, one));
     TNode t = n[0];
     Kind tk = t.getKind();
-    // T0: the extract keeps every bit.
-    if (widthEq(widthOf(t), kw))
+    // T0 (conditional, learned-rewrite-pbv): the extract keeps every bit.
     {
-      bump("T0-full-extract");
-      return t;
+      Node r = lrTruncPushFull(n, t, kw);
+      if (r != n)
+      {
+        return r;
+      }
     }
     if (!admissible(t))
     {
       return n;
     }
-    // T1: cut at an extension.
-    if (isExtend(t) && t.getNumChildren() == 2)
+    // T1, T4, T5 (conditional, learned-rewrite-pbv). Each matches a kind of t
+    // that T2 and T3 do not, so calling them first keeps the rule order.
     {
-      TNode x = t[1];
-      Node wx = widthOf(x);
-      if (widthEq(wx, kw))
+      Node r = lrTruncPushCut(n, t, i, kw);
+      if (r != n)
       {
-        bump("T1-ext-exact");
-        return x;
+        return r;
       }
-      if (d_facts.leq(kw, wx))
-      {
-        bump("T1-ext-narrow");
-        return mkLowExtract(x, i);
-      }
-      if (d_facts.leq(wx, kw))
-      {
-        bump("T1-ext-wide");
-        return nm->mkNode(tk, rewrite(nm->mkNode(Kind::SUB, kw, wx)), x);
-      }
+    }
+    if (!o.pbvMwTruncPush)
+    {
+      return n;
     }
     // T2: through an operator whose low bits depend only on low bits.
     if (tk == Kind::PBV_ADD || tk == Kind::PBV_SUB || tk == Kind::PBV_MULT
@@ -646,24 +660,6 @@ Node PbvMw::applyExtNorm(Node n)
       bump("T3-push-ite");
       return nm->mkNode(
           Kind::ITE, t[0], mkLowExtract(t[1], i), mkLowExtract(t[2], i));
-    }
-    // T4: nested low extracts.
-    if (tk == Kind::PBV_EXTRACT && t.getNumChildren() == 3 && t[2].isConst()
-        && t[2].getConst<Rational>().sgn() == 0)
-    {
-      bump("T4-extract-extract");
-      return mkLowExtract(t[0], i);
-    }
-    // T5: under a left shift only the low k bits of the shifted value count,
-    // and a sign and a zero extension agree on those.
-    if (tk == Kind::PBV_SHL && t.getNumChildren() == 2
-        && t[0].getKind() == Kind::PBV_SIGN_EXTEND
-        && d_facts.leq(kw, widthOf(t[0][1])))
-    {
-      bump("T5-shl-sext-to-zext");
-      Node a = nm->mkNode(Kind::PBV_ZERO_EXTEND, t[0][0], t[0][1]);
-      return nm->mkNode(
-          Kind::PBV_EXTRACT, nm->mkNode(Kind::PBV_SHL, a, t[1]), i, n[2]);
     }
   }
 
@@ -734,6 +730,13 @@ Node PbvMw::applyExtNorm(Node n)
     }
   }
 
+  {
+    Node r = lrExtBitwise(n);
+    if (r != n)
+    {
+      return r;
+    }
+  }
   if (o.pbvMwExtBitwise)
   {
     // --- X4 : an operand against its own negation
@@ -751,40 +754,7 @@ Node PbvMw::applyExtNorm(Node n)
         }
       }
     }
-    // --- X1 : a common extension out of a bitwise operator
-    if ((k == Kind::PBV_AND || k == Kind::PBV_OR || k == Kind::PBV_XOR)
-        && nc == 2 && isExtend(n[0]) && n[0].getKind() == n[1].getKind()
-        && n[0].getNumChildren() == 2 && n[1].getNumChildren() == 2
-        && admissible(n) && admissible(n[0]) && admissible(n[1]))
-    {
-      Kind ek = n[0].getKind();
-      Node a = n[0][1];
-      Node b = n[1][1];
-      Node wa = widthOf(a);
-      Node wb = widthOf(b);
-      Node amt;
-      if (widthEq(wa, wb))
-      {
-        amt = n[0][0];
-      }
-      else if (d_facts.leq(wa, wb))
-      {
-        a = rewriteRec(
-            nm->mkNode(ek, rewrite(nm->mkNode(Kind::SUB, wb, wa)), a));
-        amt = n[1][0];
-      }
-      else if (d_facts.leq(wb, wa))
-      {
-        b = rewriteRec(
-            nm->mkNode(ek, rewrite(nm->mkNode(Kind::SUB, wa, wb)), b));
-        amt = n[0][0];
-      }
-      if (!amt.isNull())
-      {
-        bump("X1-ext-out-of-bitwise");
-        return nm->mkNode(ek, amt, rewriteRec(nm->mkNode(k, a, b)));
-      }
-    }
+    // --- X1 (conditional): in lrExtBitwise above
     // --- X2 : not commutes with a sign extension
     if (k == Kind::PBV_NOT && nc == 1
         && n[0].getKind() == Kind::PBV_SIGN_EXTEND
@@ -795,16 +765,7 @@ Node PbvMw::applyExtNorm(Node n)
                         n[0][0],
                         rewriteRec(nm->mkNode(Kind::PBV_NOT, n[0][1])));
     }
-    // --- X3 : equality of two extensions of the same kind and width
-    if (k == Kind::EQUAL && nc == 2 && isExtend(n[0])
-        && n[0].getKind() == n[1].getKind() && n[0].getNumChildren() == 2
-        && n[1].getNumChildren() == 2
-        && widthEq(widthOf(n[0][1]), widthOf(n[1][1])) && admissible(n)
-        && admissible(n[0]) && admissible(n[1]))
-    {
-      bump("X3-eq-strip-ext");
-      return rewriteRec(nm->mkNode(Kind::EQUAL, n[0][1], n[1][1]));
-    }
+    // --- X3 (conditional): in lrExtBitwise above
     // --- X5 : extension of zero
     if (isExtend(n) && nc == 2 && isZero(n[1]) && admissible(n)
         && admissible(n[1]))
@@ -816,73 +777,21 @@ Node PbvMw::applyExtNorm(Node n)
     }
   }
 
+  // --- S1, S3 (conditional, learned-rewrite-pbv)
+  {
+    Node r = lrSextBv1(n);
+    if (r != n)
+    {
+      return r;
+    }
+  }
   if (o.pbvMwSextBv1)
   {
-    // --- S1 : sign extension of a single bit
-    if (k == Kind::PBV_SIGN_EXTEND && nc == 2
-        && widthEq(widthOf(n[1]), one))
-    {
-      bump("S1-sext-bv1");
-      return nm->mkNode(
-          Kind::PBV_NEG,
-          rewriteRec(nm->mkNode(Kind::PBV_ZERO_EXTEND, n[0], n[1])));
-    }
     // --- S2 : a - (-b) = a + b
     if (k == Kind::PBV_SUB && nc == 2 && n[1].getKind() == Kind::PBV_NEG)
     {
       bump("S2-sub-neg");
       return nm->mkNode(Kind::PBV_ADD, n[0], n[1][0]);
-    }
-    // --- S3 : under a bitwise operator a one-bit sign extension is a mask,
-    // all ones or all zeros by c, so the operator is a case split on c.
-    // Children are rewritten first, so S1's form -(zext c) is matched too.
-    if ((k == Kind::PBV_AND || k == Kind::PBV_OR || k == Kind::PBV_XOR)
-        && nc == 2 && admissible(n))
-    {
-      auto bitOf = [&](TNode e) -> Node {
-        if (e.getKind() == Kind::PBV_NEG
-            && e[0].getKind() == Kind::PBV_ZERO_EXTEND)
-        {
-          e = e[0];
-        }
-        else if (e.getKind() != Kind::PBV_SIGN_EXTEND)
-        {
-          return Node::null();
-        }
-        if (!admissible(e) || !widthEq(widthOf(e[1]), one))
-        {
-          return Node::null();
-        }
-        return e[1];
-      };
-      for (size_t s = 0; s < 2; ++s)
-      {
-        Node c = bitOf(n[s]);
-        if (c.isNull())
-        {
-          continue;
-        }
-        TNode t = n[1 - s];
-        Node w = widthOf(n);
-        Node isSet = nm->mkNode(
-            Kind::EQUAL, c, nm->mkNode(Kind::INT_TO_PBV, one, one));
-        Node zero =
-            nm->mkNode(Kind::INT_TO_PBV, w, nm->mkConstInt(Rational(0)));
-        bump("S3-bv1-mask");
-        if (k == Kind::PBV_AND)
-        {
-          return nm->mkNode(Kind::ITE, isSet, t, zero);
-        }
-        if (k == Kind::PBV_OR)
-        {
-          return nm->mkNode(
-              Kind::ITE, isSet, nm->mkNode(Kind::PBV_NOT, zero), t);
-        }
-        return nm->mkNode(Kind::ITE,
-                          isSet,
-                          rewriteRec(nm->mkNode(Kind::PBV_NOT, t)),
-                          t);
-      }
     }
   }
 
@@ -906,70 +815,18 @@ Node PbvMw::applyExtNorm(Node n)
                         rewriteRec(nm->mkNode(k, n[0], n[1][1])),
                         rewriteRec(nm->mkNode(k, n[0], n[1][2])));
     }
-    // --- I3 : the shift pair (a << m) >>s m
-    if (k == Kind::PBV_ASHR && nc == 2 && n[0].getKind() == Kind::PBV_SHL
-        && n[0].getNumChildren() == 2 && n[0][1] == n[1]
-        && n[1].getKind() == Kind::INT_TO_PBV && n[1].getNumChildren() == 2
-        && admissible(n) && admissible(n[0]) && admissible(n[1]))
+  }
+  // --- I3 (conditional, learned-rewrite-pbv)
+  {
+    Node r = lrSextIdioms(n);
+    if (r != n)
     {
-      TNode a = n[0][0];
-      Node m = n[1][1];
-      Node w = widthOf(a);
-      // w - m is the width of the slice that survives; it must be >= 1.
-      Node keep = rewrite(nm->mkNode(Kind::SUB, w, m));
-      if (d_facts.nonNeg(m)
-          && (widthPositive(keep) || d_facts.geqConst(keep, Rational(1))))
-      {
-        bump("I3-shl-ashr-sext");
-        return nm->mkNode(
-            Kind::PBV_SIGN_EXTEND,
-            m,
-            mkLowExtract(a, nm->mkNode(Kind::SUB, keep, one)));
-      }
+      return r;
     }
   }
 
-  // --- R : signed range of -2^m against a sign extension
-  //         (--pbv-mw-signed-range)
-  if (o.pbvMwSignedRange && (k == Kind::PBV_SLT || k == Kind::PBV_SLE)
-      && nc == 2 && admissible(n))
-  {
-    // Is t = (-1 << m) at a width W with m + 1 <= W, i.e. exactly -2^m?
-    auto negPow2 = [&](TNode t, Node& m) {
-      if (t.getKind() != Kind::PBV_SHL || t.getNumChildren() != 2
-          || !isOnes(t[0]) || t[1].getKind() != Kind::INT_TO_PBV
-          || t[1].getNumChildren() != 2 || !admissible(t)
-          || !admissible(t[1]) || !onesAdmissible(t[0]))
-      {
-        return false;
-      }
-      m = t[1][1];
-      return d_facts.leq(rewrite(nm->mkNode(Kind::ADD, m, one)), widthOf(t));
-    };
-    // sext(x) of a p-bit x is >= -2^(p-1) > -2^m when p <= m. A width p is
-    // positive, so p <= m also gives the m >= 0 that negPow2 needs.
-    auto above = [&](TNode t, const Node& m) {
-      if (t.getKind() != Kind::PBV_SIGN_EXTEND || t.getNumChildren() != 2
-          || !admissible(t))
-      {
-        return false;
-      }
-      Node p = widthOf(t[1]);
-      return d_facts.leq(p, m) && (widthPositive(p) || d_facts.nonNeg(m));
-    };
-    Node m;
-    if (negPow2(n[0], m) && above(n[1], m))
-    {
-      bump("R-negpow2-below-sext");
-      return nm->mkConst(true);
-    }
-    if (negPow2(n[1], m) && above(n[0], m))
-    {
-      bump("R-sext-above-negpow2");
-      return nm->mkConst(false);
-    }
-  }
-  return n;
+  // --- R (conditional, learned-rewrite-pbv)
+  return lrSignedRange(n);
 }
 
 /* == rewriting ============================================================= */
@@ -1024,137 +881,7 @@ Node PbvMw::applyRules(Node n)
         nm->mkNode(Kind::PBV_ZERO_EXTEND, amt, n[1][1]));
   }
 
-  // --- F : pull a shl out from under a matching lshr  (--pbv-shift-add-distrib)
-  //
-  //   ((x << c) + y) >> c   ->   x + (y >> c)
-  //
-  // parabit's div_mult_self, (x + y*z) div y = (x div y) + z, applied at the PBV
-  // level -- the only place left, since the int-blaster purifies its divisions
-  // into skolems while translating and no integer-level rule can see the pattern
-  // afterwards. Every operand of a multi-width goal carries zero extensions, so
-  // both the addends and the two shift amounts are compared with those stripped.
-  //
-  // Valid only when `x << c` does not overflow the width s it is computed at.
-  // For a p-bit x and a u-bit shift amount c (so c <= 2^u - 1) that is
-  //     s >= p + (2^u - 1)
-  // which is NON-linear; it goes to the order facts, where 2^u is an opaque atom
-  // and the constraint is linear in {s, p, 2^u} -- exactly the form such goals
-  // state as a precondition.
-  if (options().smt.pbvShiftAddDistrib && k == Kind::PBV_LSHR
-      && n.getNumChildren() == 2)
-  {
-    TNode add = stripZext(n[0]);
-    TNode c2 = stripZext(n[1]);
-    if (add.getKind() == Kind::PBV_ADD && add.getNumChildren() == 2)
-    {
-      for (size_t side = 0; side < 2; ++side)
-      {
-        TNode shl = stripZext(add[side]);
-        TNode y = add[1 - side];
-        if (shl.getKind() != Kind::PBV_SHL || shl.getNumChildren() != 2)
-        {
-          continue;
-        }
-        TNode x = stripZext(shl[0]);
-        TNode c1 = stripZext(shl[1]);
-        if (c1 != c2) continue;
-        Node sW = widthOf(shl);
-        Node pW = widthOf(x);
-        Node uW = widthOf(c1);
-        Node yW = widthOf(y);
-        Node outW = widthOf(n);
-        if (sW.isNull() || pW.isNull() || uW.isNull() || yW.isNull()
-            || outW.isNull())
-        {
-          continue;
-        }
-        // s >= p + (2^u - 1).  The goal may spell 2^u either way -- (** 2 u)
-        // or (int.pow2 u) -- and the order facts treat the power as an opaque
-        // atom, so a fact stated with the other spelling does not match. Try
-        // both before giving up.
-        bool ok = false;
-        for (Kind pk : {Kind::EXP, Kind::POW2})
-        {
-          Node pow2u = pk == Kind::EXP
-                           ? nm->mkNode(pk, nm->mkConstInt(Rational(2)), uW)
-                           : nm->mkNode(pk, uW);
-          Node need = rewrite(
-              nm->mkNode(Kind::ADD, pW, nm->mkNode(Kind::SUB, pow2u, one)));
-          if (d_facts.leq(need, sW))
-          {
-            ok = true;
-            break;
-          }
-        }
-        if (!ok) continue;
-        Node xe = nm->mkNode(Kind::PBV_ZERO_EXTEND,
-                             rewrite(nm->mkNode(Kind::SUB, outW, pW)), x);
-        Node ye = nm->mkNode(Kind::PBV_ZERO_EXTEND,
-                             rewrite(nm->mkNode(Kind::SUB, outW, yW)),
-                             stripZext(y));
-        bump("F-shift-add-distrib");
-        return nm->mkNode(Kind::PBV_ADD,
-                          xe,
-                          nm->mkNode(Kind::PBV_LSHR, ye, n[1]));
-      }
-    }
-  }
-
-  // --- E : sign extension over a zero extension  (--pbv-sext-to-zext) ---
-  //   (psign_extend n (pzero_extend m x))  ->  (pzero_extend (n+m) x)
-  //                                            side condition: m >= 1
-  // A zero extension by at least one bit forces the msb of its result to 0, so
-  // the enclosing sign extension pads with zeros and is a zero extension. The
-  // rewriter cannot host this: without the side condition the mixed merge is
-  // unsound, which is why pbv-merge-* carries only the zext/zext and sext/sext
-  // forms. `m` is typically a difference like `(- w9 w4)`, positive only via an
-  // asserted `(> w9 w4)`, so the condition goes to the order facts.
-  if (options().smt.pbvSextToZext && k == Kind::PBV_SIGN_EXTEND
-      && n.getNumChildren() == 2 && n[1].getKind() == Kind::PBV_ZERO_EXTEND
-      && n[1].getNumChildren() == 2)
-  {
-    Node m = n[1][0];
-    if (d_facts.geqConst(m, Rational(1)))
-    {
-      Node sum = rewrite(nm->mkNode(Kind::ADD, n[0], m));
-      bump("E-sext-over-zext");
-      return nm->mkNode(Kind::PBV_ZERO_EXTEND, sum, n[1][1]);
-    }
-  }
-
-  // --- E2 : sign extension of a difference of two narrower values --------
-  //   (psign_extend n (pbvsub X Y))  ->  (pbvsub (pzero_extend n X)
-  //                                              (pzero_extend n Y))
-  //   side condition: X and Y are each a zero extension by >= 1 bit.
-  //
-  // Both operands then have msb 0, so at their common width W they lie in
-  // [0, 2^(W-1)) and the true difference X-Y lies in (-2^(W-1), 2^(W-1)) --
-  // exactly the range a signed W-bit value represents. So the W-bit wrapped
-  // difference read as signed IS X-Y, and sign-extending it to W+n bits gives
-  // (X-Y) mod 2^(W+n), which is what subtracting the two zero-extended
-  // operands at width W+n computes. This is parabit's `signed_of_diff`.
-  //
-  // The point is not the subtraction but the extension: this is the shape the
-  // Industry equations put under a multiplication, where psign_extend's msb
-  // ITE and its two pow2 terms are what the arithmetic solver chokes on.
-  if (options().smt.pbvSextToZext && k == Kind::PBV_SIGN_EXTEND
-      && n.getNumChildren() == 2 && n[1].getKind() == Kind::PBV_SUB
-      && n[1].getNumChildren() == 2)
-  {
-    TNode X = n[1][0];
-    TNode Y = n[1][1];
-    auto msbZero = [&](TNode t) {
-      return t.getKind() == Kind::PBV_ZERO_EXTEND && t.getNumChildren() == 2
-             && d_facts.geqConst(t[0], Rational(1));
-    };
-    if (msbZero(X) && msbZero(Y))
-    {
-      Node xe = nm->mkNode(Kind::PBV_ZERO_EXTEND, n[0], X);
-      Node ye = nm->mkNode(Kind::PBV_ZERO_EXTEND, n[0], Y);
-      bump("E2-sext-of-diff");
-      return nm->mkNode(Kind::PBV_SUB, xe, ye);
-    }
-  }
+  // --- F, E, E2 (conditional): in lrRules below
 
   // --- M1 : pull a common left shift out of a conjunction (--pbv-mask-slice)
   //
@@ -1188,114 +915,12 @@ Node PbvMw::applyRules(Node n)
         n[0][1]);
   }
 
-  // --- M2 : symbolic low mask  (--pbv-mask-slice)
-  //
-  //   x & ((1 << m) - 1)  ->  (pzero_extend (w - m) (pextract x (m-1) 0))
-  //
-  // for a w-bit x, under 1 <= m <= w. This is pbv-c26-and-one generalized from
-  // the constant mask 1 to a symbolic run of m low ones. The side condition is
-  // NOT decorative: for m > w the mask is all ones (the shift has overflowed)
-  // and the conjunction is x, while the right-hand side would ask for a
-  // negative extension.
-  if (options().smt.pbvMaskSlice != options::PbvMaskSliceMode::NONE
-      && k == Kind::PBV_AND && n.getNumChildren() == 2)
-  {
-    for (size_t s2 = 0; s2 < 2; ++s2)
-    {
-      TNode x = n[s2];
-      TNode mask = n[1 - s2];
-      // mask = (pbvsub (pbvshl (int_to_pbv w 1) (int_to_pbv w m))
-      //                (int_to_pbv w 1))
-      Node m;
-      if (!isLowMask(mask, m))
-      {
-        continue;
-      }
-      Node w = widthOf(x);
-      if (w.isNull() || !widthEq(widthOf(mask), w))
-      {
-        continue;
-      }
-      // 1 <= m <= w, from the order facts of the assertions.
-      if (!widthPositive(m) || !d_facts.leq(m, w))
-      {
-        continue;
-      }
-      Node hi = rewrite(nm->mkNode(Kind::SUB, m, one));
-      bump("M2-low-mask");
-      return nm->mkNode(
-          Kind::PBV_ZERO_EXTEND,
-          rewrite(nm->mkNode(Kind::SUB, w, m)),
-          rewriteRec(nm->mkNode(
-              Kind::PBV_EXTRACT, x, hi, nm->mkConstInt(Rational(0)))));
-    }
-  }
-
-  // --- M3 : push a low extract through a left shift  (--pbv-mask-slice)
-  //
-  //   (a << z)[m-1:0]  ->  a[m-1:0] << z[m-1:0]      side condition: z <u m
-  //
-  // The guard is NOT optional: for z >= m the left side is 0 (every kept bit
-  // was shifted past the extract), while the right side shifts by z mod 2^m,
-  // which need not be >= m. `z <u m` comes from an asserted
-  // `(pbvult z (int_to_pbv w m))` -- the in-range statement such goals carry
-  // for every shift amount -- compared with the zero extensions stripped,
-  // since a zero extension does not change the value.
-  if (options().smt.pbvMaskSlice != options::PbvMaskSliceMode::NONE
-      && k == Kind::PBV_EXTRACT
-      && n.getNumChildren() == 3 && n[2].isConst()
-      && n[2].getConst<Rational>().sgn() == 0
-      && n[0].getKind() == Kind::PBV_SHL && n[0].getNumChildren() == 2)
-  {
-    Node i = n[1];
-    Node target = rewrite(nm->mkNode(Kind::ADD, i, one));  // extract width
-    auto bit = d_ultBound.find(stripZext(n[0][1]));
-    if (bit != d_ultBound.end() && widthEq(bit->second, target))
-    {
-      bump("M3-extract-through-shl");
-      return nm->mkNode(
-          Kind::PBV_SHL,
-          rewriteRec(nm->mkNode(Kind::PBV_EXTRACT, n[0][0], i, n[2])),
-          rewriteRec(nm->mkNode(Kind::PBV_EXTRACT, n[0][1], i, n[2])));
-    }
-  }
-
-  // --- A / B : low extract  t[i:0] -------------------------------------
-  if (options().smt.pbvPreprocessMw && k == Kind::PBV_EXTRACT
-      && n.getNumChildren() == 3
-      && n[2].isConst() && n[2].getConst<Rational>().sgn() == 0)
-  {
-    Node i = n[1];
-    Node target = nm->mkNode(Kind::ADD, i, one);  // the extract's width
-    Node child = n[0];
-
-    // A: the extract exactly covers an extension's source.
-    if (isExtend(child) && widthEq(widthOf(child[1]), target))
-    {
-      bump(child.getKind() == Kind::PBV_ZERO_EXTEND ? "A1-zext" : "A2-sext");
-      return child[1];
-    }
-    // B: push through an operator when one side is such an extension.
-    if (isPushOp(child.getKind()) && child.getNumChildren() == 2)
-    {
-      for (size_t s = 0; s < 2; ++s)
-      {
-        TNode e = child[s];
-        TNode other = child[1 - s];
-        if (!isExtend(e) || !widthEq(widthOf(e[1]), target))
-        {
-          continue;
-        }
-        Node trunc = nm->mkNode(Kind::PBV_EXTRACT, other, i, n[2]);
-        bump(s == 0 ? "B1-left" : "B2-right");
-        return s == 0 ? nm->mkNode(child.getKind(), e[1], trunc)
-                      : nm->mkNode(child.getKind(), trunc, e[1]);
-      }
-    }
-    return n;
-  }
-
-  return n;
+  // --- F, E, E2, M2, M3, A/B (conditional, learned-rewrite-pbv). F is on a
+  // lshr, E/E2 on a sign extension, M2 on a conjunction with a low-mask operand
+  // and M3, A and B on a low extract -- none of them overlaps G or M1 above or
+  // the extension-normalization and bitwise families, so running them here
+  // keeps the order they always had.
+  return lrRules(n);
 }
 
 /* == bitwise families (W, G, K) ============================================ */
@@ -1613,7 +1238,7 @@ Node PbvMw::acNormBitwise(Node n)
 Node PbvMw::applyBitwise(Node n)
 {
   const options::HolderSMT& o = options().smt;
-  if (!o.pbvMwShiftBitwise && !o.pbvMwSignIdioms && !o.pbvMwMaskFacts)
+  if (!o.pbvMwShiftBitwise && !o.pbvMwSignIdioms && !d_cond.anyBitwise())
   {
     return n;
   }
@@ -1648,76 +1273,18 @@ Node PbvMw::applyBitwise(Node n)
       bump("W1");
       return nm->mkNode(Kind::PBV_NOT, rewriteRec(nm->mkNode(k, n[0][0], n[1])));
     }
-    // W2: a shift and its inverse leave a mask
-    if ((k == Kind::PBV_LSHR && n[0].getKind() == Kind::PBV_SHL)
-        || (k == Kind::PBV_SHL && n[0].getKind() == Kind::PBV_LSHR))
+  }
+  // W2, W4, W3 (conditional, learned-rewrite-pbv): shift pairs and bitwise
+  // operators, ahead of the W5 normalization as always.
+  {
+    Node r = lrShiftBitwise(n);
+    if (r != n)
     {
-      if (n[0][1] == n[1])
-      {
-        Node ones = nm->mkNode(Kind::PBV_NOT, zeroOf(n));
-        bump("W2");
-        return acNormBitwise(nm->mkNode(
-            Kind::PBV_AND, n[0][0], rewriteRec(nm->mkNode(k, ones, n[1]))));
-      }
+      return r;
     }
-    // W4: an extension by the same amount leaves a bitwise operator
-    if (isBitwise(k) && isExtend(n[0]))
-    {
-      bool same = true;
-      for (const Node& c : n)
-      {
-        same = same && c.getKind() == n[0].getKind() && c[0] == n[0][0];
-      }
-      if (same)
-      {
-        std::vector<Node> inner;
-        for (const Node& c : n) inner.push_back(c[1]);
-        bump("W4");
-        return nm->mkNode(n[0].getKind(),
-                          n[0][0],
-                          rewriteRec(acNormBitwise(nm->mkNode(k, inner))));
-      }
-    }
-    // W3: (y >> c) & (ones >> c) -> y >> c, likewise <<
-    if (k == Kind::PBV_AND)
-    {
-      // over the whole flattened conjunction: the chain is binary-nested
-      std::vector<Node> kids;
-      std::vector<Node> work(n.begin(), n.end());
-      while (!work.empty())
-      {
-        Node c = work.back();
-        work.pop_back();
-        if (c.getKind() == Kind::PBV_AND)
-        {
-          work.insert(work.end(), c.begin(), c.end());
-        }
-        else
-        {
-          kids.push_back(c);
-        }
-      }
-      for (size_t i = 0; i < kids.size(); ++i)
-      {
-        Kind ki = kids[i].getKind();
-        if ((ki != Kind::PBV_LSHR && ki != Kind::PBV_SHL)
-            || !isOnes(kids[i][0]))
-        {
-          continue;
-        }
-        for (size_t j = 0; j < kids.size(); ++j)
-        {
-          if (j != i && kids[j].getKind() == ki && kids[j][1] == kids[i][1])
-          {
-            kids.erase(kids.begin() + i);
-            bump("W3");
-            return kids.size() == 1
-                       ? kids[0]
-                       : rewriteRec(acNormBitwise(nm->mkNode(k, kids)));
-          }
-        }
-      }
-    }
+  }
+  if (o.pbvMwShiftBitwise)
+  {
     // W5
     if (isBitwise(k))
     {
@@ -1730,6 +1297,15 @@ Node PbvMw::applyBitwise(Node n)
     }
   }
 
+  // G2a, G4 (conditional, learned-rewrite-pbv): sgt/sge and bitwise
+  // operators, which no unconditional G rule matches.
+  {
+    Node r = lrSignIdioms(n);
+    if (r != n)
+    {
+      return r;
+    }
+  }
   if (o.pbvMwSignIdioms)
   {
     // G1: (x & msbmask) = 0  ->  ~(x <s 0)
@@ -1752,15 +1328,7 @@ Node PbvMw::applyBitwise(Node n)
         }
       }
     }
-    // G2: comparisons with 0 and -1 as a sign test (sgt/sge read as the
-    // swapped slt/sle, which the rewriter does not always do first)
-    if ((k == Kind::PBV_SGT || k == Kind::PBV_SGE)
-        && (isZero(n[0]) || isOnes(n[0]) || isZero(n[1]) || isOnes(n[1])))
-    {
-      bump("G2");
-      return nm->mkNode(
-          k == Kind::PBV_SGT ? Kind::PBV_SLT : Kind::PBV_SLE, n[1], n[0]);
-    }
+    // G2 (sgt/sge against 0 / -1, conditional): in lrSignIdioms above
     if (k == Kind::PBV_SLT && isOnes(n[0]))
     {
       bump("G2");
@@ -1786,37 +1354,26 @@ Node PbvMw::applyBitwise(Node n)
                         nm->mkNode(Kind::PBV_NOT, z),
                         z);
     }
-    // G4: a bitwise operator over a constant-branched ITE
-    if (isBitwise(k))
+    // G4 (conditional): in lrSignIdioms above
+    // G6
+    if (k == Kind::ITE && n[0].getKind() == Kind::NOT)
     {
-      for (size_t i = 0; i < n.getNumChildren(); ++i)
-      {
-        TNode t = n[i];
-        if (t.getKind() != Kind::ITE || !(isZero(t[1]) || isOnes(t[1]))
-            || !(isZero(t[2]) || isOnes(t[2])))
-        {
-          continue;
-        }
-        std::vector<Node> a, b;
-        for (size_t j = 0; j < n.getNumChildren(); ++j)
-        {
-          a.push_back(j == i ? Node(t[1]) : n[j]);
-          b.push_back(j == i ? Node(t[2]) : n[j]);
-        }
-        bump("G4");
-        return nm->mkNode(Kind::ITE,
-                          t[0],
-                          rewriteRec(acNormBitwise(nm->mkNode(k, a))),
-                          rewriteRec(acNormBitwise(nm->mkNode(k, b))));
-      }
+      bump("G6");
+      return nm->mkNode(Kind::ITE, n[0][0], n[2], n[1]);
     }
-    // G5: cancel an addition through an ITE
-    if (k == Kind::PBV_ADD && n.getNumChildren() == 2)
+  }
+
+  // G5 (a, b unconditional; c conditional, learned-rewrite-pbv). On a binary
+  // pbvadd, which no other G rule matches.
+  if (k == Kind::PBV_ADD && n.getNumChildren() == 2)
+  {
+    for (size_t i = 0; i < 2; ++i)
     {
-      for (size_t i = 0; i < 2; ++i)
+      TNode x = n[i], z = n[1 - i];
+      if (o.pbvMwSignIdioms)
       {
-        TNode x = n[i], z = n[1 - i];
-        if (x.getKind() == Kind::PBV_SUB && x.getNumChildren() == 2 && x[1] == z)
+        if (x.getKind() == Kind::PBV_SUB && x.getNumChildren() == 2
+            && x[1] == z)
         {
           bump("G5");
           return x[0];
@@ -1826,108 +1383,17 @@ Node PbvMw::applyBitwise(Node n)
           bump("G5");
           return z;
         }
-        if (x.getKind() == Kind::ITE)
-        {
-          auto helps = [&](TNode br) {
-            return isZero(br)
-                   || (br.getKind() == Kind::PBV_SUB && br.getNumChildren() == 2
-                       && br[1] == z);
-          };
-          if (helps(x[1]) || helps(x[2]))
-          {
-            bump("G5");
-            return nm->mkNode(Kind::ITE,
-                              x[0],
-                              rewriteRec(nm->mkNode(Kind::PBV_ADD, x[1], z)),
-                              rewriteRec(nm->mkNode(Kind::PBV_ADD, x[2], z)));
-          }
-        }
       }
-    }
-    // G6
-    if (k == Kind::ITE && n[0].getKind() == Kind::NOT)
-    {
-      bump("G6");
-      return nm->mkNode(Kind::ITE, n[0][0], n[2], n[1]);
+      Node r = lrSignIdiomsAddIte(n, i);
+      if (r != n)
+      {
+        return r;
+      }
     }
   }
 
-  if (o.pbvMwMaskFacts && !d_lowMaskFacts.empty())
-  {
-    // K1: compare against a low mask as a test of the bits above it
-    if ((k == Kind::PBV_ULT && d_lowMaskFacts.count(n[0]))
-        || (k == Kind::PBV_ULE && d_lowMaskFacts.count(n[1])))
-    {
-      bool lt = k == Kind::PBV_ULT;
-      Node m = lt ? n[0] : n[1];
-      Node x = lt ? n[1] : n[0];
-      Node above = rewriteRec(
-          nm->mkNode(Kind::PBV_AND, x, nm->mkNode(Kind::PBV_NOT, m)));
-      Node isZeroAbove = above.eqNode(zeroOf(m));
-      bump("K1");
-      return lt ? isZeroAbove.notNode() : isZeroAbove;
-    }
-    // K2: the low bits of a difference
-    if (k == Kind::PBV_AND && n.getNumChildren() == 2)
-    {
-      for (size_t i = 0; i < 2; ++i)
-      {
-        TNode m = n[i], d = n[1 - i];
-        if (!d_lowMaskFacts.count(m) || d.getKind() != Kind::PBV_SUB
-            || d.getNumChildren() != 2)
-        {
-          continue;
-        }
-        auto masked = [&](TNode t) {
-          return t.getKind() == Kind::PBV_AND
-                 && std::find(t.begin(), t.end(), m) != t.end();
-        };
-        if (masked(d[0]) && masked(d[1])) continue;
-        auto mask = [&](TNode t) {
-          return rewriteRec(
-              nm->mkNode(Kind::PBV_AND, m, dropDisjoint(m, t)));
-        };
-        bump("K2");
-        return acNormBitwise(nm->mkNode(
-            Kind::PBV_AND,
-            m,
-            nm->mkNode(Kind::PBV_SUB, mask(d[0]), mask(d[1]))));
-      }
-    }
-  }
-  if (o.pbvMwMaskFacts)
-  {
-    // K3: ite(x & m = 0, x & m', x) -> x for complements m, m'
-    if (k == Kind::ITE && n.getType().isPbv() && n[0].getKind() == Kind::EQUAL)
-    {
-      TNode c = n[0];
-      TNode x = n[2], t = n[1];
-      for (size_t s = 0; s < 2; ++s)
-      {
-        TNode a = c[s];
-        if (!isZero(c[1 - s]) || a.getKind() != Kind::PBV_AND
-            || a.getNumChildren() != 2 || t.getKind() != Kind::PBV_AND
-            || t.getNumChildren() != 2)
-        {
-          continue;
-        }
-        for (size_t j = 0; j < 2; ++j)
-        {
-          if (a[j] != x) continue;
-          TNode m = a[1 - j];
-          for (size_t q = 0; q < 2; ++q)
-          {
-            if (t[q] == x && areComplements(m, t[1 - q]))
-            {
-              bump("K3");
-              return x;
-            }
-          }
-        }
-      }
-    }
-  }
-  return n;
+  // K1, K2, K3 (conditional, learned-rewrite-pbv)
+  return lrMaskFacts(n);
 }
 
 Node PbvMw::rewriteRec(TNode n)
@@ -1997,23 +1463,40 @@ PreprocessingPassResult PbvMw::applyInternal(
   // Adm of the input first, so it survives, and let the order facts use it.
   const options::HolderSMT& o = options().smt;
   const bool bitwise =
-      o.pbvMwShiftBitwise || o.pbvMwSignIdioms || o.pbvMwMaskFacts;
+      o.pbvMwShiftBitwise || o.pbvMwSignIdioms || d_cond.anyBitwise();
   const size_t numOriginal = assertionsToPreprocess->size();
   if (o.pbvMwTruncPush || o.pbvMwLowMask || o.pbvMwExtBitwise
-      || o.pbvMwSextBv1 || o.pbvMwSextIdioms || o.pbvMwSignedRange || bitwise)
+      || o.pbvMwSextBv1 || o.pbvMwSextIdioms || d_cond.d_truncPush
+      || d_cond.d_extBitwise || d_cond.d_sextBv1 || d_cond.d_sextIdioms
+      || d_cond.d_signedRange || bitwise)
   {
     std::vector<Node> adm;
     pinAdmissibility(all, adm);
+    // learned-rewrite-pbv and pbv-mw both pin; the second finds the first's
+    // constraints already asserted.
+    std::unordered_set<Node> present(all.begin(), all.end());
     for (const Node& c : adm)
     {
+      if (present.count(c))
+      {
+        continue;
+      }
       assertionsToPreprocess->push_back(c, false, nullptr,
                                         TrustId::UNKNOWN_PREPROCESS_LEMMA,
                                         true);
       all.push_back(c);
     }
   }
-  // For the `m >= 1` side condition of rule E; harmless when that rule is off.
-  d_facts.harvest(all);
+  // The order facts behind every side condition: the assertions with the
+  // pinned Adm, plus the literals non-clausal simplification has learned, if
+  // it has run (it normally has not, this early).
+  std::vector<Node> facts(all);
+  if (d_cond.anyPbv())
+  {
+    std::vector<Node> ll = d_preprocContext->getLearnedLiterals();
+    facts.insert(facts.end(), ll.begin(), ll.end());
+  }
+  d_facts.harvest(facts);
   if (bitwise)
   {
     // Width canonicalization (families W/G/K): only on the original
@@ -2033,7 +1516,7 @@ PreprocessingPassResult PbvMw::applyInternal(
         }
       }
     }
-    if (o.pbvMwMaskFacts)
+    if (d_cond.d_maskFacts)
     {
       std::vector<Node> now;
       for (size_t i = 0; i < numOriginal; ++i)

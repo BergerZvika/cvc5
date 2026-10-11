@@ -57,6 +57,7 @@
 #include "preprocessing/passes/ite_removal.h"
 #include "preprocessing/passes/ite_simp.h"
 #include "preprocessing/passes/learned_rewrite.h"
+#include "preprocessing/passes/learned_rewrite_pbv.h"
 #include "preprocessing/passes/miplib_trick.h"
 #include "preprocessing/passes/nl_ext_purify.h"
 #include "preprocessing/passes/non_clausal_simp.h"
@@ -161,6 +162,7 @@ PreprocessingPassRegistry::PreprocessingPassRegistry()
   registerPassInfo("ff-bitsum", callCtor<FfBitsum>);
   registerPassInfo("ff-disjunctive-bit", callCtor<FfDisjunctiveBit>);
   registerPassInfo("learned-rewrite", callCtor<LearnedRewrite>);
+  registerPassInfo("learned-rewrite-pbv", callCtor<LearnedRewritePbv>);
   registerPassInfo("foreign-theory-rewrite", callCtor<ForeignTheoryRewrite>);
   registerPassInfo("synth-rr", callCtor<SynthRewRulesPass>);
   registerPassInfo("real-to-int", callCtor<RealToInt>);

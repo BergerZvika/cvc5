@@ -1125,6 +1125,8 @@ set(regress_0_tests
   regress0/pbv/bv-as-int-pbv-pipeline-model.smt2
   regress0/pbv/bv-as-int-pbv-pipeline-rw.smt2
   regress0/pbv/bv-as-int-pbv-pipeline-uf.smt2
+  regress0/pbv/learned-rewrite-mod-neg-k.smt2
+  regress0/pbv/learned-rewrite-mod-nested.smt2
   regress0/pbv/pbv-mw-mask-facts.smt2
   regress0/pbv/pbv-mw-shift-bitwise-sat.smt2
   regress0/pbv/pbv-mw-shift-bitwise.smt2

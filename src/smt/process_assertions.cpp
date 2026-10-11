@@ -31,6 +31,7 @@
 #include "expr/node_algorithm.h"
 #include "expr/skolem_manager.h"
 #include "preprocessing/assertion_pipeline.h"
+#include "preprocessing/passes/learned_rewrite_rules.h"
 #include "preprocessing/preprocessing_pass_registry.h"
 #include "printer/printer.h"
 #include "smt/assertions.h"
@@ -143,10 +144,22 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   // Pin the value of every (exp -1 e), immediately after definition expansion
   // so that every later pass sees the facts. Placement was measured on the 109
   // hardest LoAT instances.
+  // Once --exp-preprocess is given, the pass is its 'add' token (it ADDS
+  // facts about instances) rather than a side effect of the negone-parity
+  // lemma family.
+  const bool expPreGiven = options().arith.expPreprocessWasSetByUser;
+  auto expPreHas = [this](const std::string& tok) {
+    const std::string& l = options().arith.expPreprocess;
+    return ("," + l + ",").find("," + tok + ",") != std::string::npos
+           || ("," + l + ",").find(",all,") != std::string::npos;
+  };
   if (options().arith.expNegOneParity
-      || theory::arith::ExpFeatureSet(options().arith.expLemmasMode,
-                                      theory::arith::ExpFeatureAxis::LEMMAS)
-             .has("negone-parity"))
+      || (expPreGiven
+              ? expPreHas("add")
+              : theory::arith::ExpFeatureSet(
+                    options().arith.expLemmasMode,
+                    theory::arith::ExpFeatureAxis::LEMMAS)
+                    .has("negone-parity")))
   {
     applyPass("exp-negone-parity", ap);
   }
@@ -223,13 +236,27 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   // Multi-width PBV rewrites must run BEFORE the translation: psign_extend's
   // integer encoding is an msb ITE plus two extra pow2 terms and a product,
   // which cannot be undone once built.
-  if (options().smt.pbvPreprocessMw || options().smt.pbvSextToZext
-      || options().smt.pbvShiftAddDistrib || options().smt.pbvMaskSlice != options::PbvMaskSliceMode::NONE
+  //
+  // pbv-mw runs the unconditional families. When conditional ones are
+  // selected (--learned-rewrite-rules), learned-rewrite-pbv runs INSTEAD: it
+  // is the same engine with the unconditional families on too, so the two
+  // kinds reach their common fixed point in one traversal. Running pbv-mw
+  // again afterwards is not a no-op -- it re-rewrites the normalized result
+  // with the conditional rules off and lands somewhere else (ic/
+  // check_ne_bvashr1_kbit went from 1.4s to a timeout).
+  const preprocessing::passes::LearnedRewriteRules lrRules =
+      preprocessing::passes::LearnedRewriteRules::fromString(
+          options().smt.learnedRewriteRules);
+  if (lrRules.anyPbv())
+  {
+    applyPass("learned-rewrite-pbv", ap);
+  }
+  else if (options().smt.pbvShiftAddDistrib
+      || options().smt.pbvMaskSlice != options::PbvMaskSliceMode::NONE
       || options().smt.pbvMwTruncPush || options().smt.pbvMwLowMask
       || options().smt.pbvMwExtBitwise || options().smt.pbvMwSextBv1
-      || options().smt.pbvMwSextIdioms || options().smt.pbvMwSignedRange
-      || options().smt.pbvMwShiftBitwise || options().smt.pbvMwSignIdioms
-      || options().smt.pbvMwMaskFacts)
+      || options().smt.pbvMwSextIdioms || options().smt.pbvMwShiftBitwise
+      || options().smt.pbvMwSignIdioms)
   {
     applyPass("pbv-mw", ap);
   }
@@ -340,7 +367,9 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   }
   Trace("smt") << " assertions     : " << ap.size() << endl;
 
-  if (options().smt.learnedRewrite)
+  // The built-in learned rewrites (--learned-rewrite) and the integer
+  // conditional families of --learned-rewrite-rules (the mod-2^k reducer).
+  if (options().smt.learnedRewrite || lrRules.anyInt())
   {
     applyPass("learned-rewrite", ap);
   }
@@ -417,7 +446,8 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
   // --arith-exp-base-order unless set explicitly.
   if (options().arith.arithRatIdentity
       || (options().arith.expBaseOrder
-          && !options().arith.arithRatIdentityWasSetByUser))
+          && !options().arith.arithRatIdentityWasSetByUser
+          && !options().arith.expPreprocessWasSetByUser))
   {
     applyPass("arith-rat-identity", ap);
   }

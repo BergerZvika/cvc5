@@ -13,7 +13,7 @@
  * Certification that a polynomial integer equality carrying a once-occurring
  * variable is vacuous, by deciding the residual congruence symbolically in the
  * Frobenius quotient ring rather than by enumerating residues. Enabled by
- * --arith-fermat-vacuity.
+ * --fermat-little-theorem.
  */
 
 #include "cvc5_private.h"

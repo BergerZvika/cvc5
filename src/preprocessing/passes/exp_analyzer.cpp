@@ -192,7 +192,28 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
                       || mode == Mode::MULTIPLY_ONLY_L3_COMMON_REPORT
                       || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT
                       || mode == Mode::MULTIPLY_ONLY_L4_REPORT
-                      || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+                      || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT
+                      || mode == Mode::MULTIPLY_ONLY_ADDING_INSTANCES_REPORT
+                      || mode == Mode::DIV_REPORT
+                      || mode == Mode::DIV_ADDING_INSTANCES_REPORT
+                      || mode == Mode::COMMON_ADDING_INSTANCES_REPORT
+                      || mode == Mode::ADDING_INSTANCES_REPORT;
+  // adding-instances alone: no merge, only the L3/L4 lemmas below
+  // (--exp-preprocess=add without reduce).
+  const bool noMerge =
+      mode == Mode::ADDING_INSTANCES || mode == Mode::ADDING_INSTANCES_REPORT;
+  // adding-instances: after any of the three merges (multiply-only, div,
+  // common), relate the powers it left with both L3 and L4. 'relate' is the
+  // old name of the multiply-only variant.
+  const bool addingInstances =
+      mode == Mode::MULTIPLY_ONLY_RELATE
+      || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT
+      || mode == Mode::MULTIPLY_ONLY_ADDING_INSTANCES
+      || mode == Mode::MULTIPLY_ONLY_ADDING_INSTANCES_REPORT
+      || mode == Mode::DIV_ADDING_INSTANCES
+      || mode == Mode::DIV_ADDING_INSTANCES_REPORT
+      || mode == Mode::COMMON_ADDING_INSTANCES
+      || mode == Mode::COMMON_ADDING_INSTANCES_REPORT || noMerge;
   // After the multiply-only merge, optionally relate the powers it could not
   // fold (those whose exponent gap is symbolic). L3 and L4 are selectable
   // independently so their contributions can be measured apart.
@@ -206,21 +227,24 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
                         || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT;
   const bool doL3 = mode == Mode::MULTIPLY_ONLY_L3
                     || mode == Mode::MULTIPLY_ONLY_L3_REPORT
-                    || l3Common
-                    || mode == Mode::MULTIPLY_ONLY_RELATE
-                    || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+                    || l3Common || addingInstances;
   const bool doL4 = mode == Mode::MULTIPLY_ONLY_L4
                     || mode == Mode::MULTIPLY_ONLY_L4_REPORT
                     || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4
                     || mode == Mode::MULTIPLY_ONLY_L3_COMMON_L4_REPORT
-                    || mode == Mode::MULTIPLY_ONLY_RELATE
-                    || mode == Mode::MULTIPLY_ONLY_RELATE_REPORT;
+                    || addingInstances;
   const bool relate = doL3 || doL4 || l3Common;
   // commonPivot: pivot on the most-frequent instance and divide smaller
-  // powers down (naive scheme). Otherwise pivot on the smallest exponent and
-  // only multiply up (exact).
+  // powers down (naive scheme). divPivot: pivot on the GREATEST exponent and
+  // divide every other instance down. Otherwise pivot on the smallest
+  // exponent and only multiply up (exact).
   const bool commonPivot =
-      mode == Mode::COMMON || mode == Mode::COMMON_REPORT;
+      mode == Mode::COMMON || mode == Mode::COMMON_REPORT
+      || mode == Mode::COMMON_ADDING_INSTANCES
+      || mode == Mode::COMMON_ADDING_INSTANCES_REPORT;
+  const bool divPivot = mode == Mode::DIV || mode == Mode::DIV_REPORT
+                        || mode == Mode::DIV_ADDING_INSTANCES
+                        || mode == Mode::DIV_ADDING_INSTANCES_REPORT;
 
   std::map<Node, uint64_t> counts;
   std::vector<Node> order;
@@ -309,13 +333,19 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
   std::unordered_map<Node, Node> sub;  // node-to-replace -> replacement
   for (auto& [key, members] : groups)
   {
-    if (members.size() < 2) continue;
+    if (noMerge || members.size() < 2) continue;
     const Node& base = key.first;
     const bool constBase = base.isConst();
     // b = 1 or b = -1: b^(S+a) = b^(a-p) * b^(S+p) holds for every exponent
     // (1 always, -1 by parity), so no sign condition is needed.
     const bool unitBase =
         constBase && base.getConst<Rational>().abs() == Rational(1);
+    // Needed to divide down (div / common): b != 0, i.e. a non-zero numeral
+    // or a symbolic base entailed >= 1 or <= -1.
+    const bool baseNonZero =
+        constBase ? !base.getConst<Rational>().isZero()
+                  : (facts.geqConst(base, Rational(1))
+                     || facts.leq(base, nm->mkConstInt(Rational(-1))));
     // Pivot choice (see commonPivot above):
     //  * default: the member with the SMALLEST exponent offset (ties -> most
     //    occurrences). Every other member is then a LARGER power reached by
@@ -326,6 +356,9 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
     //  * commonPivot: the member with the MOST occurrences (ties -> smallest
     //    offset). Smaller powers are then rewritten by DIVIDING the pivot
     //    down. Kept for A/B comparison against the default.
+    //  * divPivot: the member with the GREATEST offset (ties -> most
+    //    occurrences). Every other member is a smaller power, reached by
+    //    dividing the pivot down.
     size_t piv = 0;
     for (size_t i = 1; i < members.size(); ++i)
     {
@@ -335,6 +368,11 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
       if (commonPivot)
       {
         better = ci > cp || (ci == cp && members[i].off < members[piv].off);
+      }
+      else if (divPivot)
+      {
+        better = members[i].off > members[piv].off
+                 || (members[i].off == members[piv].off && ci > cp);
       }
       else
       {
@@ -351,11 +389,18 @@ PreprocessingPassResult ExpAnalyzer::applyInternal(
       const Node& m = members[i].node;
       Rational d = members[i].off - pOff;  // exponent(m) - exponent(pivot)
       if (d.isZero()) continue;            // identical exponent value
-      // In the default (smallest) pivot mode d > 0 always; with commonPivot d
-      // may be negative (smaller power -> divide down).
-      Assert(commonPivot || d.sgn() > 0);
+      // In the default (smallest) pivot mode d > 0 always, in the div mode
+      // d < 0 always; with commonPivot d may have either sign (a smaller
+      // power is divided down).
+      Assert(commonPivot || (divPivot ? d.sgn() < 0 : d.sgn() > 0));
       // The smaller exponent of the pair must be entailed non-negative.
       if (!unitBase && !facts.nonNeg(d.sgn() > 0 ? pivot[1] : m[1]))
+      {
+        continue;
+      }
+      // Dividing down also needs b != 0: for b = 0 and S+a = 0 the member is
+      // 0^0 = 1 while the pivot 0^(S+p) is 0, and so is the quotient.
+      if (d.sgn() < 0 && !baseNonZero)
       {
         continue;
       }

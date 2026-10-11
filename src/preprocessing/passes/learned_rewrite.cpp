@@ -15,6 +15,9 @@
 
 #include "preprocessing/passes/learned_rewrite.h"
 
+#include "options/smt_options.h"
+#include "preprocessing/passes/pbv_mod_reducer.h"
+
 #include "expr/skolem_manager.h"
 #include "expr/term_context_stack.h"
 #include "preprocessing/assertion_pipeline.h"
@@ -52,12 +55,70 @@ std::ostream& operator<<(std::ostream& out, LearnedRewriteId i)
 
 LearnedRewrite::LearnedRewrite(PreprocessingPassContext* preprocContext)
     : PreprocessingPass(preprocContext, "learned-rewrite"),
+      d_rules(LearnedRewriteRules::fromString(
+          options().smt.learnedRewriteRules)),
       d_lrewCount(statisticsRegistry().registerHistogram<LearnedRewriteId>(
           "LearnedRewrite::lrewCount"))
 {
 }
 
 PreprocessingPassResult LearnedRewrite::applyInternal(
+    AssertionPipeline* assertionsToPreprocess)
+{
+  if (options().smt.learnedRewrite)
+  {
+    PreprocessingPassResult res = applyBuiltin(assertionsToPreprocess);
+    if (res == PreprocessingPassResult::CONFLICT)
+    {
+      return res;
+    }
+  }
+  if (d_rules.anyInt())
+  {
+    applyConditional(assertionsToPreprocess);
+  }
+  return PreprocessingPassResult::NO_CONFLICT;
+}
+
+void LearnedRewrite::applyConditional(AssertionPipeline* assertionsToPreprocess)
+{
+  Pow2ModReducer reducer(d_env,
+                         d_rules.d_reduceMods,
+                         d_rules.d_reduceModsWidth,
+                         d_rules.d_shiftGuardElim);
+  // Facts: every assertion -- including the ADM/RANGE constraints pbv-to-int
+  // added, so `i < kappa(t)` and `kappa > 0` are available alongside the
+  // user's own width constraints -- and the learned literals.
+  std::vector<Node> facts;
+  facts.reserve(assertionsToPreprocess->size());
+  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+  {
+    facts.push_back((*assertionsToPreprocess)[i]);
+  }
+  std::vector<Node> ll = d_preprocContext->getLearnedLiterals();
+  facts.insert(facts.end(), ll.begin(), ll.end());
+  reducer.harvest(facts);
+
+  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
+  {
+    Node before = (*assertionsToPreprocess)[i];
+    Node after = reducer.reduce(before);
+    if (after != before)
+    {
+      assertionsToPreprocess->replace(i, after);
+      assertionsToPreprocess->ensureRewritten(i);
+    }
+  }
+  Trace("learned-rewrite") << "learned-rewrite: reduce-mods removed "
+                           << reducer.numRemoved() << " mod(s)";
+  for (const auto& [c, n] : reducer.caseCounts())
+  {
+    Trace("learned-rewrite") << "  case" << c << "=" << n;
+  }
+  Trace("learned-rewrite") << std::endl;
+}
+
+PreprocessingPassResult LearnedRewrite::applyBuiltin(
     AssertionPipeline* assertionsToPreprocess)
 {
   NodeManager* nm = nodeManager();

@@ -51,6 +51,14 @@ name   = "SMT Layer"
   help       = "rewrite the input based on learned literals"
 
 [[option]]
+  name       = "learnedRewriteRules"
+  category   = "expert"
+  long       = "learned-rewrite-rules=LIST"
+  type       = "std::string"
+  default    = "\"none\""
+  help       = "comma-separated list of the CONDITIONAL rewrite families -- every PBV and integer rewrite whose side condition is decided against facts rather than by matching alone -- to run in the learned-rewrite passes. Side conditions are checked against the order facts of the assertions (transitively closed difference bounds) together with the literals learned by non-clausal simplification, so a rule fires when either proves its condition. PBV tokens run in the learned-rewrite-pbv pass, before pbv-to-int and in place of pbv-mw (it runs pbv-mw's unconditional families too) (no literals have been learned that early, so these use the assertions only): preprocess-mw (A1/A2/B1/B2, a low extract at or through an extension whose source width is i+1), sext-to-zext (E/E2, sign extension over a zero extension by m >= 1), shift-add-distrib (F, ((x << c) + y) >> c -> x + (y >> c) under s >= p + 2^u - 1), mask-slice (M2/M3, symbolic low mask under 1 <= m <= w; extract through shl under an asserted z <u m), trunc-push (T0/T1/T4/T5), ext-bitwise (X1/X3), sext-bv1 (S1/S3, one-bit sign extension), sext-idioms (I3, (a << K) >>s K), signed-range (R1/R2, -2^m against a sign extension), shift-bitwise (W2/W3/W4), sign-idioms (G2a/G4/G5c), mask-facts (K1/K2/K3, rules over asserted low-mask and complement facts). Integer tokens run in the learned-rewrite pass, after pbv-to-int and non-clausal simplification: reduce-mods (cases 1-5 of the mod-2^k reducer, stripping an inner mod 2^m under an outer mod 2^k with 0 <= k <= m), reduce-mods-width (group A and cases 11, 13: delete a mod or division by a computed width bound), shift-guard-elim (case 20, drop `ite(2^e = 0, ..)` guards when e >= 0). Aggregates: none (default), ext-norm (trunc-push,ext-bitwise,sext-bv1,sext-idioms,signed-range), pbv (every PBV token), int (reduce-mods,reduce-mods-width; when given explicitly it also selects --arith-witness-search=200 --arith-witness-search-signed --arith-witness-enum=20000 as defaults, so an explicit value of any of those wins), exp (every integer-level family -- reduce-mods,reduce-mods-width,shift-guard-elim -- and no PBV family, so only the learned-rewrite pass runs and learned-rewrite-pbv does not: the mode for integer and exponential input), all (everything, including shift-guard-elim). An unknown token is an error. The unconditional PBV rules stay in pbv-mw behind their own --pbv-* flags; --pbv-rw-mw=all, --pbv-mw, --solve-bv-as-int=pbv and --arith-exp-lemmas=all add the tokens of the rules they used to enable."
+
+[[option]]
   name       = "produceModels"
   category   = "common"
   short      = "m"
@@ -430,10 +438,10 @@ name   = "SMT Layer"
   help = "Introduce a UF operator for bvand, and eagerly add bitwise lemmas"
 [[option.mode.PBV]]
   name = "pbv"
-  help = "Lift BV input to PBV and translate it with the PBV int-blaster (PIntBlaster) INSIDE the bv-to-int pass, i.e. before the `rewrite`, `pbv-mw` and `pbv-to-int` passes run. Those passes therefore never see the lifted terms: the PBV rewriter families (--pbv-rw-ac, --pbv-rw-bool, --pbv-rw-mw), the multi-width pass (--pbv-preprocess-mw, --pbv-sext-to-zext, --pbv-shift-add-distrib, --pbv-mask-slice) and the pbv-to-int post-passes (--pbv-to-int-reduce-mods, --pbv-type-check) are selected but have nothing to act on. Use `pbv-pipeline` to get them. This mode also selects the tuned PBV configuration as DEFAULTS: --arith-exp-lemmas=exp-full --analyze-exp-instances=multiply-only-relate --pbv-preprocess-mw --pbv-rw-ac --pbv-sext-to-zext --pbv-rw-bool --pbv-shift-add-distrib --pbv-rw-mw=cav26 --pbv-mask-slice=all --pbv-to-int-reduce-mods=all --piand-lemmas=complement --decision=stoponly --pbv-uts-mode=flip --pbv-lift-uf. Each is a default only, so any of them given explicitly on the command line wins, e.g. `--solve-bv-as-int=pbv --pbv-rw-mw=none` subtracts one family; an explicit --pbv-mw=LIST likewise overrides the families it names."
+  help = "Lift BV input to PBV and translate it with the PBV int-blaster (PIntBlaster) INSIDE the bv-to-int pass, i.e. before the `rewrite`, `pbv-mw` and `pbv-to-int` passes run. Those passes therefore never see the lifted terms: the PBV rewriter families (--pbv-rw-ac, --pbv-rw-bool, --pbv-rw-mw), the multi-width pass (--learned-rewrite-rules=preprocess-mw, --learned-rewrite-rules=sext-to-zext, --pbv-shift-add-distrib, --pbv-mask-slice) and the pbv-to-int post-passes (--learned-rewrite-rules=int, --pbv-type-check) are selected but have nothing to act on. Use `pbv-pipeline` to get them. This mode also selects the tuned PBV configuration as DEFAULTS: --arith-exp-lemmas=exp-full --analyze-exp-instances=multiply-only-relate --learned-rewrite-rules=preprocess-mw --pbv-rw-ac --learned-rewrite-rules=sext-to-zext --pbv-rw-bool --pbv-shift-add-distrib --pbv-rw-mw=cav26 --pbv-mask-slice=all --learned-rewrite-rules=int --piand-lemmas=complement --decision=stoponly --pbv-uts-mode=flip --pbv-lift-uf. Each is a default only, so any of them given explicitly on the command line wins, e.g. `--solve-bv-as-int=pbv --pbv-rw-mw=none` subtracts one family; an explicit --pbv-mw=LIST likewise overrides the families it names."
 [[option.mode.PBV_PIPELINE]]
   name = "pbv-pipeline"
-  help = "Lift BV input to PBV in the bv-to-int pass and STOP there, leaving the lifted PBV assertions (plus one `(= (pbvsize pbv_x) k)` width pin per lifted variable) in the pipeline, so that they then go through exactly the passes a native PBV input does: `rewrite` (the PBV rewriter, --pbv-rw-*), `pbv-mw` and `pbv-to-int` (the PBV int-blaster with its --pbv-uts-mode, --pbv-to-int-reduce-mods and --pbv-type-check post-passes), followed by the exp passes. This is the mode in which every PBV improvement applies to a bit-vector input; `pbv` translates before those passes run. Model values for the original BV variables are recovered by pbv-to-int as `((_ nat2bv k) chi(pbv_x))`. Selects the same tuned defaults as `pbv`, including --pbv-lift-uf. An assertion containing a BV operator the lifter does not handle (bvcomp, the overflow predicates) makes the whole run fall back to native bit-vectors, as in `pbv`."
+  help = "Lift BV input to PBV in the bv-to-int pass and STOP there, leaving the lifted PBV assertions (plus one `(= (pbvsize pbv_x) k)` width pin per lifted variable) in the pipeline, so that they then go through exactly the passes a native PBV input does: `rewrite` (the PBV rewriter, --pbv-rw-*), `pbv-mw` and `pbv-to-int` (the PBV int-blaster with its --pbv-uts-mode, --learned-rewrite-rules=int and --pbv-type-check post-passes), followed by the exp passes. This is the mode in which every PBV improvement applies to a bit-vector input; `pbv` translates before those passes run. Model values for the original BV variables are recovered by pbv-to-int as `((_ nat2bv k) chi(pbv_x))`. Selects the same tuned defaults as `pbv`, including --pbv-lift-uf. An assertion containing a BV operator the lifter does not handle (bvcomp, the overflow predicates) makes the whole run fall back to native bit-vectors, as in `pbv`."
 [[option.mode.PBV_DIRECT]]
   name = "pbv-direct"
   help = "Translate BV input with the PBV int-blaster (PIntBlaster) DIRECTLY, with no BV-to-PBV lifting at all: no pbv_x variables, no `(= (pbvsize pbv_x) k)` pins and no kappa skolems. Each fixed-width BV term is handled as the PBV term of the same shape whose width is the literal width of its sort, so every `(** 2 k)` the translation writes has a constant exponent and folds. The translation and its options (--pbv-uts-mode other than flip, --pbv-to-int-use-pow2, ...) are the PBV ones, and the arithmetic side of the tuned PBV configuration (--arith-exp-lemmas=exp-full, --piand-lemmas=complement, --decision=stoponly, ...) is selected as defaults exactly as for `pbv`. The PBV-level rewrites (--pbv-rw-*, the pbv-mw pass, --pbv-uts-mode=flip) do not apply, since there are no PBV terms for them to act on; use `pbv-pipeline` for those. Falls back to native bit-vectors, as `pbv` does, when an assertion holds a BV operator the blaster has no case for (rotate, repeat, bvcomp, the overflow predicates) or a quantifier over a bit-vector sort. Models for the BV variables are recovered as `((_ int_to_bv k) chi(x))`."
@@ -508,27 +516,6 @@ name   = "SMT Layer"
   help = "PBV-level rewrite of the comparison by biasing both operands: a <rel_s b becomes (pbvadd a H) <rel_u (pbvadd b H) with H = int_to_pbv(k, 2^(k-1)). No uts term, no case split and no explicit mod; the wrap is pbvadd's own."
 
 [[option]]
-  name       = "pbvToIntReduceMods"
-  category   = "expert"
-  long       = "pbv-to-int-reduce-mods=MODE"
-  type       = "PbvReduceModsMode"
-  default    = "NONE"
-  help       = "after the PBV-to-int translation to NIA, run a post-pass that removes redundant `mod 2^k` operations (see --pbv-to-int-reduce-mods=help). Uses the width-ordering facts already present in the translated assertions (ADM/RANGE constraints) to discharge the side condition of each rewrite. Each mod removed also removes a purification skolem and a nonlinear q*2^k monomial. The mode selects WHICH family of rewrites to apply, so that the two families can be benchmarked against each other. Disabled by default."
-  help_mode  = "Mod-reduction rule families. 'base' is the original set: nested-mod absorption in either direction, distribution of an enclosing mod through +/-/*/unary- and through ITE branches, and the extract shape `M(M(x,m) div 2^j, w)` with `j+w <= m`. Every base rule strips an inner mod that some surviving outer mod already subsumes, so the range information the arithmetic solver relies on is never lost. 'cav26' is the family adapted from the parabit rewrite set (CAV 2026 artifact): it computes a symbolic width bound for a term -- a width expression `w` with `0 <= t < 2^w` -- from the term's structure, and deletes an enclosing `mod 2^k` outright whenever `w <= k` is entailed. That covers a product of a p-bit and a q-bit value under a (p+q)-bit mod, a sum of two narrower values, multiplication by a single bit, a division whose numerator is already bounded, a piand under a mod at least as wide, and a left shift by a bounded amount; it also merges nested pow2 divisions. Unlike the base family these rules can delete the last mod carrying a term's range, so they trade solver information for a smaller formula and should be measured, not assumed. 'all' runs both."
-[[option.mode.NONE]]
-  name = "none"
-  help = "Do not run the post-pass (default)."
-[[option.mode.BASE]]
-  name = "base"
-  help = "Original rule set only: cases 1-5, each of which leaves a surviving mod that still carries the range."
-[[option.mode.CAV26]]
-  name = "cav26"
-  help = "Width-bound rule family adapted from the parabit (CAV 2026) rewrite set only: delete a mod whose argument is provably below it, merge nested pow2 divisions, and strip subsumed mods from piand arguments."
-[[option.mode.ALL]]
-  name = "all"
-  help = "Run both families."
-
-[[option]]
   name       = "pbvTypeCheck"
   category   = "expert"
   long       = "pbv-type-check=MODE"
@@ -561,20 +548,12 @@ name   = "SMT Layer"
   help       = "after translation, run a post-pass that reduces a modulus whose divisor is a power to a case split on the two exponents, for any base s entailed to be at least 2: '(mod (exp s a) (exp s b))' becomes 'ite(a >= b, 0, (exp s a))'. Valid for s >= 2 and a, b >= 0 by divisibility of powers; the side conditions are discharged from constants, from the term structure, or from the order facts in the assertions, and the term is left alone where they cannot be. When the order is entailed the ITE collapses, so no case split reaches the solver. This removes the q*s^b monomial that expanding the modulus would otherwise hand to the nonlinear extension. Applies to any logic, not only the PBV translation. This is the ONLY rule the pass applies: the product form '(mod (* x (exp s a)) (exp s b))' -> 'ite(a >= b, 0, (* (mod x (exp s (- b a))) (exp s a)))' is valid too but is deliberately not applied. Disabled by default."
 
 [[option]]
-  name       = "pbvPreprocessMw"
-  category   = "expert"
-  long       = "pbv-preprocess-mw"
-  type       = "bool"
-  default    = "false"
-  help       = "enable the multi-width PBV preprocessing pass (pbv-mw), which runs BEFORE the translation to NIA: annihilate a low extract at a zero/sign extension whose source width matches, and push a low extract inward through pbvor/pbvxor/pbvadd/pbvsub/pbvmul to reach one. The width side condition is resolved against the asserted `(= (pbvsize x) V)` links, which a syntactic rewriter cannot do. pbvand is excluded to avoid looping with pbv-reverse-extract-and. Disabled by default."
-
-[[option]]
   name       = "pbvShiftAddDistrib"
   category   = "expert"
   long       = "pbv-shift-add-distrib"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, pull a left shift out from under a matching right shift: `((x << c) + y) >> c` becomes `x + (y >> c)`, looking through the zero extensions that a multi-width goal puts on every operand and requiring the two shift amounts to agree once those are stripped. This is parabit's div_mult_self, `(x + y*z) div y = (x div y) + z`, in the only place cvc5 can still apply it: the int-blaster purifies its divisions into skolems while translating, so no integer-level rule can see the pattern afterwards. The rewrite is valid only when `x << c` does not overflow the width it is computed at, which for a p-bit x and a u-bit shift amount is `s >= p + (2^u - 1)` -- a NON-linear condition, discharged against the order facts, where 2^u is treated as an opaque atom so the constraint is linear in {s, p, 2^u} and matches the precondition such goals state verbatim. Disabled by default."
+  help       = "in the pbv-mw pass, pull a left shift out from under a matching right shift: `((x << c) + y) >> c` becomes `x + (y >> c)`, looking through the zero extensions that a multi-width goal puts on every operand and requiring the two shift amounts to agree once those are stripped. This is parabit's div_mult_self, `(x + y*z) div y = (x div y) + z`, in the only place cvc5 can still apply it: the int-blaster purifies its divisions into skolems while translating, so no integer-level rule can see the pattern afterwards. The rewrite is valid only when `x << c` does not overflow the width it is computed at, which for a p-bit x and a u-bit shift amount is `s >= p + (2^u - 1)` -- a NON-linear condition, discharged against the order facts, where 2^u is treated as an opaque atom so the constraint is linear in {s, p, 2^u} and matches the precondition such goals state verbatim. Disabled by default. NOTE: rule F itself, the shl pull-out described above, is conditional and is no longer selected here -- it is the shift-add-distrib token of --learned-rewrite-rules. This flag now enables only rule G, `zext(n, x >> y) -> zext(n,x) >> zext(n,y)`."
 
 [[option]]
   name       = "pbvMaskSlice"
@@ -582,7 +561,7 @@ name   = "SMT Layer"
   long       = "pbv-mask-slice=MODE"
   type       = "PbvMaskSliceMode"
   default    = "NONE"
-  help       = "in the pbv-mw preprocessing pass, decide `x & M` for a CONTIGUOUS bit mask M by turning it into the bit-slice of x that M selects, so the conjunction never reaches the arithmetic solver as a piand (see --pbv-mask-slice=help). Disabled by default."
+  help       = "in the pbv-mw preprocessing pass, decide `x & M` for a CONTIGUOUS bit mask M by turning it into the bit-slice of x that M selects, so the conjunction never reaches the arithmetic solver as a piand (see --pbv-mask-slice=help). Disabled by default. NOTE: the conditional rules M2 and M3 are no longer selected here -- they are the mask-slice token of --learned-rewrite-rules. This option now selects only M1 (and whether it is restricted to a low-mask operand)."
   help_mode  = "Three rules run together. M2 rewrites the symbolic low mask, `x & ((1 << m) - 1)` -> `(pzero_extend (w-m) (pextract x (m-1) 0))` for a w-bit x, the generalization of pbv-c26-and-one from the constant mask 1 to a symbolic run of m low ones; its side condition 1 <= m <= w is discharged from the order facts, where a width counts as positive by construction since Adm(phi) is only stated later, by pbv-to-int. M3 pushes a low extract through a left shift, `(a << z)[m-1:0]` -> `a[m-1:0] << z[m-1:0]`, under `z <u m` -- NOT optional, since for z >= m the left side is zero while the right shifts by `z mod 2^m` -- taken from an asserted `(pbvult z (int_to_pbv w m))`, which is how a width-parametric goal states that a shift amount is in range. M1, `(a << z) & (b << z)` -> `(a & b) << z`, is sound with no side condition and exists to put the mask next to the value, since a masked shift carries the shift on BOTH operands. Together with rule A (low extract at a matching extension) the three close an extract-of-masked-shift goal in preprocessing: `((x << c)[m-1:0]) << d` against `((x << c) << d) & (((1 << m) - 1) << d)` becomes a syntactic identity, where otherwise the piand survives the translation and the proof has to be found in NIA over symbolic powers. The MODE selects when M1 fires, which is the only place the three trade against each other. NOTE the interaction with --pbv-rw-mw=base|all: pbv-merge-shl rewrites the nested `(x << c) << d` into an ITE before this pass runs, so M1 no longer matches and the chain never starts; use --pbv-rw-mw=cav26 or none alongside this flag. Implies the pbv-mw pass is run."
 [[option.mode.NONE]]
   name = "none"
@@ -595,20 +574,12 @@ name   = "SMT Layer"
   help = "M2, M3 and M1 unconditional. On the sat25 PBV set this solves two `rewrite/terms_size3` instances that 'masked' does not, at the cost of the test-pbv1233 regression above. Measure, do not assume."
 
 [[option]]
-  name       = "pbvSextToZext"
-  category   = "expert"
-  long       = "pbv-sext-to-zext"
-  type       = "bool"
-  default    = "false"
-  help       = "in the pbv-mw preprocessing pass, replace a sign extension whose argument is itself a zero extension by a single zero extension: `(psign_extend n (pzero_extend m x))` becomes `(pzero_extend (n+m) x)` when `m >= 1` is entailed by the asserted width constraints. Sound because a zero extension by at least one bit forces the most significant bit of its result to 0, so the outer sign extension pads with zeros. The rewriter cannot do this -- the mixed zext/sext merge is unsound WITHOUT the side condition, which is why pbv-merge-* omits it -- and `m` is typically a difference like `(- w9 w4)` that is positive only by virtue of an asserted `(> w9 w4)`, so the condition is discharged against the order facts of the assertions. This removes psign_extend's integer encoding (an msb ITE plus two pow2 terms and a product) outright, which matters most when such terms are multiplied together. Implies the pbv-mw pass is run. Disabled by default."
-
-[[option]]
   name       = "pbvMwExtNorm"
   category   = "expert"
   long       = "pbv-mw-ext-norm"
   type       = "bool"
   default    = "false"
-  help       = "umbrella for the extension-normalization rule families of the pbv-mw pass: selects --pbv-mw-trunc-push, --pbv-mw-low-mask, --pbv-mw-ext-bitwise, --pbv-mw-sext-bv1, --pbv-mw-sext-idioms and --pbv-mw-signed-range as DEFAULTS, so any of them given explicitly wins (e.g. `--pbv-mw-ext-norm --no-pbv-mw-low-mask`). Together they decide, before int-blasting, the instcombine-style multi-width identities over sign/zero extensions and truncations, which the NIA encoding with symbolic powers of two cannot. Disabled by default."
+  help       = "umbrella for the extension-normalization rule families of the pbv-mw pass: selects --pbv-mw-trunc-push, --pbv-mw-low-mask, --pbv-mw-ext-bitwise, --pbv-mw-sext-bv1, --pbv-mw-sext-idioms and --learned-rewrite-rules=signed-range as DEFAULTS, so any of them given explicitly wins (e.g. `--pbv-mw-ext-norm --no-pbv-mw-low-mask`). Together they decide, before int-blasting, the instcombine-style multi-width identities over sign/zero extensions and truncations, which the NIA encoding with symbolic powers of two cannot. Disabled by default. NOTE: --learned-rewrite-rules=signed-range no longer exists, and the conditional rules of the other families (T0 T1 T4 T5, X1 X3, S1 S3, I3) moved to --learned-rewrite-rules; this umbrella also adds the ext-norm token of that list (trunc-push,ext-bitwise,sext-bv1,sext-idioms,signed-range) as a default."
 
 [[option]]
   name       = "pbvMwTruncPush"
@@ -616,7 +587,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-trunc-push"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, push a low extract `t[k-1:0]` all the way down: through pbvadd/pbvsub/pbvmul/pbvand/pbvor/pbvxor/pbvnot/pbvneg and ITE (the low k bits of each depend only on the low k bits of its operands), and cut it at an extension `EXT n x` of a w-bit x: to x when w = k, to `x[k-1:0]` when k <= w, and to `EXT (k-w) x` when w <= k, the order being discharged against the asserted width constraints. Unlike rules A/B of --pbv-preprocess-mw it needs no operand to be an extension of exactly the extract's width, and it revisits the terms it builds, so a chain of pushes reaches the leaves. Implies the pbv-mw pass is run. Disabled by default."
+  help       = "in the pbv-mw pass, push a low extract `t[k-1:0]` all the way down: through pbvadd/pbvsub/pbvmul/pbvand/pbvor/pbvxor/pbvnot/pbvneg and ITE (the low k bits of each depend only on the low k bits of its operands), and cut it at an extension `EXT n x` of a w-bit x: to x when w = k, to `x[k-1:0]` when k <= w, and to `EXT (k-w) x` when w <= k, the order being discharged against the asserted width constraints. Unlike rules A/B of --learned-rewrite-rules=preprocess-mw it needs no operand to be an extension of exactly the extract's width, and it revisits the terms it builds, so a chain of pushes reaches the leaves. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rules T0, T1, T4 and T5 are the trunc-push token of --learned-rewrite-rules; this flag now enables T2 and T3 only."
 
 [[option]]
   name       = "pbvMwLowMask"
@@ -632,7 +603,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-ext-bitwise"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, pull an extension out of bitwise operators: `OP(EXT n a, EXT n b) -> EXT n (OP a b)` for OP in pbvand/pbvor/pbvxor and both extensions of the same kind over equal-width sources, and `pbvnot (psign_extend n a) -> psign_extend n (pbvnot a)`. Extensions of the same kind over sources of different widths are aligned first, `EXT (t-a) x -> EXT (t-b) (EXT (b-a) x)` when a <= b is entailed. Also strips a common extension from an equality, `(= (EXT n a) (EXT n b)) -> (= a b)`, which is sound since both extensions are injective, and folds `a OP (pbvnot a)` to its constant. Implies the pbv-mw pass is run. Disabled by default."
+  help       = "in the pbv-mw pass, pull an extension out of bitwise operators: `OP(EXT n a, EXT n b) -> EXT n (OP a b)` for OP in pbvand/pbvor/pbvxor and both extensions of the same kind over equal-width sources, and `pbvnot (psign_extend n a) -> psign_extend n (pbvnot a)`. Extensions of the same kind over sources of different widths are aligned first, `EXT (t-a) x -> EXT (t-b) (EXT (b-a) x)` when a <= b is entailed. Also strips a common extension from an equality, `(= (EXT n a) (EXT n b)) -> (= a b)`, which is sound since both extensions are injective, and folds `a OP (pbvnot a)` to its constant. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rules X1 and X3 are the ext-bitwise token of --learned-rewrite-rules; this flag now enables X2, X4 and X5 only."
 
 [[option]]
   name       = "pbvMwSextBv1"
@@ -640,7 +611,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-sext-bv1"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, write the sign extension of a 1-bit value c as the negation of its zero extension, `psign_extend n c -> pbvneg (pzero_extend n c)` (sext(1) is all ones, i.e. -1 = -zext(1)), and fold the double negation it exposes, `pbvsub a (pbvneg b) -> pbvadd a b`. Under a bitwise operator the 1-bit sign extension is instead read as the mask it is, a case split on c: `sext(c) & t -> ite(c = 1, t, 0)`, `sext(c) | t -> ite(c = 1, ones, t)`, `sext(c) ^ t -> ite(c = 1, ~t, t)`. The width side condition w(c) = 1 is resolved through the asserted `(= (pbvsize c) 1)` links. This replaces psign_extend's msb ITE and its two pow2 terms by a linear term over a 0/1 value. Implies the pbv-mw pass is run. Disabled by default."
+  help       = "in the pbv-mw pass, write the sign extension of a 1-bit value c as the negation of its zero extension, `psign_extend n c -> pbvneg (pzero_extend n c)` (sext(1) is all ones, i.e. -1 = -zext(1)), and fold the double negation it exposes, `pbvsub a (pbvneg b) -> pbvadd a b`. Under a bitwise operator the 1-bit sign extension is instead read as the mask it is, a case split on c: `sext(c) & t -> ite(c = 1, t, 0)`, `sext(c) | t -> ite(c = 1, ones, t)`, `sext(c) ^ t -> ite(c = 1, ~t, t)`. The width side condition w(c) = 1 is resolved through the asserted `(= (pbvsize c) 1)` links. This replaces psign_extend's msb ITE and its two pow2 terms by a linear term over a 0/1 value. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rules S1 and S3 are the sext-bv1 token of --learned-rewrite-rules; this flag now enables S2 only."
 
 [[option]]
   name       = "pbvMwSextIdioms"
@@ -648,15 +619,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-sext-idioms"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, normalize extension idioms: merge nested extensions of the same kind, `EXT n (EXT m x) -> EXT (n+m) x` (pbv-merge-zext/-sext, which the rewriter only runs under --pbv-rw-mw=base|base-cav26); push a sign or zero extension into an ITE, `EXT n (ite c a b) -> ite c (EXT n a) (EXT n b)`; and recognize the shift-pair sign extension, `pbvashr (pbvshl a K) K -> psign_extend n a[w-n-1:0]` for a w-bit a and K = int_to_pbv(w, n) with 0 <= n <= w - 1 entailed. Implies the pbv-mw pass is run. Disabled by default."
-
-[[option]]
-  name       = "pbvMwSignedRange"
-  category   = "expert"
-  long       = "pbv-mw-signed-range"
-  type       = "bool"
-  default    = "false"
-  help       = "in the pbv-mw pass, decide a signed comparison between a large negative power of two and a sign extension from the ranges of the two signed values. `C = (pbvshl -1 (int_to_pbv W m))` is exactly -2^m when m + 1 <= W, and `psign_extend n x` of a p-bit x is at least -2^(p-1); so when p <= m is entailed, `C <s sext(x)` and `C <=s sext(x)` are true and `sext(x) <s C`, `sext(x) <=s C` are false. This is the instcombine fold of a comparison against a constant below the range of a narrower sign-extended value, which the NIA encoding cannot see once both sides are blasted to symbolic powers of two. Implies the pbv-mw pass is run. Disabled by default."
+  help       = "in the pbv-mw pass, normalize extension idioms: merge nested extensions of the same kind, `EXT n (EXT m x) -> EXT (n+m) x` (pbv-merge-zext/-sext, which the rewriter only runs under --pbv-rw-mw=base|base-cav26); push a sign or zero extension into an ITE, `EXT n (ite c a b) -> ite c (EXT n a) (EXT n b)`; and recognize the shift-pair sign extension, `pbvashr (pbvshl a K) K -> psign_extend n a[w-n-1:0]` for a w-bit a and K = int_to_pbv(w, n) with 0 <= n <= w - 1 entailed. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rule I3 is the sext-idioms token of --learned-rewrite-rules; this flag now enables I1 and I2 only."
 
 [[option]]
   name       = "pbvMwShiftBitwise"
@@ -664,7 +627,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-shift-bitwise"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, move shifts through bitwise operators and normalize bitwise chains: `(a OP b) SH c -> (a SH c) OP (b SH c)` for OP in pbvand/pbvor/pbvxor and SH in pbvshl/pbvlshr/pbvashr (and `~a >>s c -> ~(a >>s c)`), `(x << c) >> c -> x & (ones >> c)` and `(x >> c) << c -> x & (ones << c)`, absorb `ones >> c` next to another `_ >> c` in a conjunction (likewise <<), pull an extension by the same amount out of a bitwise operator (the equal operand widths make the sources equal-width), and flatten/sort/deduplicate and/or/xor chains with their 0/ones operands folded. Every `(pbvsize v)` is first replaced by its width class representative, so the two sides of an identity end up as the same term. All rules are unconditional. Implies the pbv-mw pass is run. Disabled by default."
+  help       = "in the pbv-mw pass, move shifts through bitwise operators and normalize bitwise chains: `(a OP b) SH c -> (a SH c) OP (b SH c)` for OP in pbvand/pbvor/pbvxor and SH in pbvshl/pbvlshr/pbvashr (and `~a >>s c -> ~(a >>s c)`), `(x << c) >> c -> x & (ones >> c)` and `(x >> c) << c -> x & (ones << c)`, absorb `ones >> c` next to another `_ >> c` in a conjunction (likewise <<), pull an extension by the same amount out of a bitwise operator (the equal operand widths make the sources equal-width), and flatten/sort/deduplicate and/or/xor chains with their 0/ones operands folded. Every `(pbvsize v)` is first replaced by its width class representative, so the two sides of an identity end up as the same term. All rules are unconditional. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rules W2, W3 and W4 are the shift-bitwise token of --learned-rewrite-rules; this flag now enables W1 and W5 only."
 
 [[option]]
   name       = "pbvMwSignIdioms"
@@ -672,23 +635,7 @@ name   = "SMT Layer"
   long       = "pbv-mw-sign-idioms"
   type       = "bool"
   default    = "false"
-  help       = "in the pbv-mw pass, normalize sign tests: `(x & (1 << (w-1))) = 0 -> ~(x <s 0)`, `-1 <s x` and `0 <=s x -> ~(x <s 0)`, `x <=s -1 -> x <s 0`, the sign broadcast `m >>s (w-1) -> ite(m <s 0, ones, 0)`, a bitwise operator over an ITE with 0/ones branches split into the ITE, an addition pushed into an ITE when that cancels (`(y - z) + z -> y`), and `ite(~c, a, b) -> ite(c, b, a)`. Implies the pbv-mw pass is run. Disabled by default."
-
-[[option]]
-  name       = "pbvMwMaskFacts"
-  category   = "expert"
-  long       = "pbv-mw-mask-facts"
-  type       = "bool"
-  default    = "false"
-  help       = "in the pbv-mw pass, use mask facts stated by top-level conjuncts: M is a low mask 2^k-1 when `((M+1) & ((M+1)-1)) = 0` is asserted, p and q are disjoint when `p & q = 0` is, complements when `p = ~q` is. Then `M <u x -> (x & ~M) != 0`, `x <=u M -> (x & ~M) = 0`, `M & (a - b) -> M & ((M & a') - (M & b'))` (the low bits of a difference depend only on the low bits of its operands; a', b' drop xor/or operands disjoint from M), and `ite(x & m = 0, x & m', x) -> x` for complements m, m'. Implies the pbv-mw pass is run. Disabled by default."
-
-[[option]]
-  name       = "pbvShiftGuardElim"
-  category   = "expert"
-  long       = "pbv-shift-guard-elim"
-  type       = "bool"
-  default    = "false"
-  help       = "collapse the degenerate-case guards in the translated shift encoding. bvlshrSym/bvshlSym wrap the division (resp. multiplication) in `ite(2^e = 0, .., ..)` tests, which can only be taken when an exponent is negative; when `e >= 0` is entailed by the assertions the test is false and the ite is its else branch. Removing it matters less for the ite itself than for what it hides: with the guard in place the nested-division merge `(a div 2^y) div 2^z -> a div 2^(y+z)` of --pbv-to-int-reduce-mods=cav26 can never match, because the inner division is buried under two ites, and neither can the surrounding mod be dropped. parabit's shr_def/shl_def carry no guard at all, which is why it merges these directly. Runs inside the mod-reduction post-pass and discharges `e >= 0` against its order facts, so it needs --pbv-to-int-reduce-mods set. Disabled by default."
+  help       = "in the pbv-mw pass, normalize sign tests: `(x & (1 << (w-1))) = 0 -> ~(x <s 0)`, `-1 <s x` and `0 <=s x -> ~(x <s 0)`, `x <=s -1 -> x <s 0`, the sign broadcast `m >>s (w-1) -> ite(m <s 0, ones, 0)`, a bitwise operator over an ITE with 0/ones branches split into the ITE, an addition pushed into an ITE when that cancels (`(y - z) + z -> y`), and `ite(~c, a, b) -> ite(c, b, a)`. Implies the pbv-mw pass is run. Disabled by default. NOTE: the conditional rules G2a (sgt/sge), G4 and G5c are the sign-idioms token of --learned-rewrite-rules; this flag now enables G1, G2b-d, G3, G5a, G5b and G6 only."
 
 [[option]]
   name       = "pbvRwBool"
@@ -744,7 +691,15 @@ name   = "SMT Layer"
   long       = "pbv-mw=LIST"
   type       = "std::string"
   default    = "\"none\""
-  help       = "comma-separated list selecting the opt-in multi-width (MW) PBV rewrite, preprocessing and mod-reduction families in one place. Every token is exactly equivalent to one of the standalone --pbv-* flags, which all keep working; an explicitly given standalone flag always wins over this list, so it can be used to subtract from an aggregate. An unknown token is an error rather than a silent no-op. Tokens: none (default, nothing). Preprocessing, before translation: preprocess (= --pbv-preprocess-mw; the extract-over-extension rules A1/A2 and the push-through-operator rules B1/B2); sext-to-zext (= --pbv-sext-to-zext; rule E, sext-over-zext, plus E2, sext of a difference); shift-add-distrib (= --pbv-shift-add-distrib; rule F, pulling a left shift out of a right shift, plus rule G, zext through lshr, which exists to make F reachable). Rewriting: rw-mw, alias rw-mw=all (= --pbv-rw-mw; also rw-mw=base for the pbv-merge-* set plus pbv-mul-two, and rw-mw=cav26 for the pbv-c26-* bitwise identities); ac (= --pbv-rw-ac; AC-normalize the and/or/xor/add/mul chains); bool (= --pbv-rw-bool; decide equalities in the and/or/xor/not fragment by exhaustive table, capped by --pbv-rw-bool-cap); nnf (= --pbv-rw-nnf; De Morgan, pairs with ac); shift-zext-merge (= --pbv-rw-shift-zext-merge; the multi-width shift merge that pbv-merge-lshr cannot reach). After int-blasting: reduce-mods, alias reduce-mods=all (= --pbv-to-int-reduce-mods; also reduce-mods=base for the nested/distribution/extract cases 1-5, and reduce-mods=cav26 for the parabit width-bound family); shift-guard-elim (= --pbv-shift-guard-elim; drop the 2^e=0 shift guards, which unblocks the nested pow2-division merge); partial-mod (= --pbv-to-int-partial-mod; emit INTS_MODULUS rather than INTS_MODULUS_TOTAL). Aggregates: pbv (the tuned multi-width configuration, exactly equivalent to 'preprocess,rw-mw=all,reduce-mods=all,ac,bool,sext-to-zext,shift-add-distrib', i.e. to the standalone line --pbv-preprocess-mw --pbv-rw-mw=all --pbv-to-int-reduce-mods=all --pbv-rw-ac --pbv-rw-bool --pbv-sext-to-zext --pbv-shift-add-distrib); all (every token above, i.e. 'pbv' plus nnf, shift-zext-merge, shift-guard-elim and partial-mod)."
+  help       = "comma-separated list selecting the opt-in multi-width (MW) PBV rewrite, preprocessing and mod-reduction families in one place. Every token is exactly equivalent to one of the standalone --pbv-* flags, which all keep working; an explicitly given standalone flag always wins over this list, so it can be used to subtract from an aggregate. An unknown token is an error rather than a silent no-op. Tokens: none (default, nothing). Preprocessing, before translation: preprocess (= --learned-rewrite-rules=preprocess-mw; the extract-over-extension rules A1/A2 and the push-through-operator rules B1/B2); sext-to-zext (= --learned-rewrite-rules=sext-to-zext; rule E, sext-over-zext, plus E2, sext of a difference); shift-add-distrib (= --pbv-shift-add-distrib; rule F, pulling a left shift out of a right shift, plus rule G, zext through lshr, which exists to make F reachable). Rewriting: rw-mw, alias rw-mw=all (= --pbv-rw-mw; also rw-mw=base for the pbv-merge-* set plus pbv-mul-two, and rw-mw=cav26 for the pbv-c26-* bitwise identities); ac (= --pbv-rw-ac; AC-normalize the and/or/xor/add/mul chains); bool (= --pbv-rw-bool; decide equalities in the and/or/xor/not fragment by exhaustive table, capped by --pbv-rw-bool-cap); nnf (= --pbv-rw-nnf; De Morgan, pairs with ac); shift-zext-merge (= --pbv-rw-shift-zext-merge; the multi-width shift merge that pbv-merge-lshr cannot reach). After int-blasting: reduce-mods, alias reduce-mods=all (= --learned-rewrite-rules=int; also reduce-mods=base for the nested/distribution/extract cases 1-5, and reduce-mods=cav26 for the parabit width-bound family); shift-guard-elim (= --learned-rewrite-rules=shift-guard-elim; drop the 2^e=0 shift guards, which unblocks the nested pow2-division merge); partial-mod (= --pbv-to-int-partial-mod; emit INTS_MODULUS rather than INTS_MODULUS_TOTAL). Aggregates: pbv (the tuned multi-width configuration, exactly equivalent to 'preprocess,rw-mw=all,reduce-mods=all,ac,bool,sext-to-zext,shift-add-distrib', i.e. to the standalone line --learned-rewrite-rules=preprocess-mw --pbv-rw-mw=all --learned-rewrite-rules=int --pbv-rw-ac --pbv-rw-bool --learned-rewrite-rules=sext-to-zext --pbv-shift-add-distrib); all (every token above, i.e. 'pbv' plus nnf, shift-zext-merge, shift-guard-elim and partial-mod)."
+
+[[option]]
+  name       = "pbvRewrites"
+  category   = "expert"
+  long       = "pbv-rewrites"
+  type       = "bool"
+  default    = "false"
+  help       = "the T_PBV rewrite rules WITHOUT side conditions of the paper's configuration table (its Table 5) in one flag: --pbv-rw-mw=cav26 (the pbv-c26-* identities), --pbv-rw-ac, --pbv-rw-bool, --pbv-mw-trunc-push (T2, T3), --pbv-mw-low-mask (L), --pbv-mw-ext-bitwise (X2, X4, X5), --pbv-mw-sext-idioms (I1, I2), --pbv-mw-sext-bv1 (S2), --pbv-mw-shift-bitwise (W1, W5), --pbv-shift-add-distrib (G), --pbv-mw-sign-idioms (G1-3, G5, G6), --pbv-mask-slice=all (M1), --pbv-uts-mode=flip, and the two unsigned-division identities, --pbv-div-lemmas. Each is a default only, so any of them given explicitly wins. The rules WITH side conditions are --learned-rewrite-rules=pbv; this flag selects none of them."
 
 [[option]]
   name       = "pbvRwMw"
@@ -768,7 +723,7 @@ name   = "SMT Layer"
   help = "Run both families. This is what 'all' used to mean, and what the rw-mw token of --pbv-mw still selects."
 [[option.mode.ALL]]
   name = "all"
-  help = "The tuned PBV preprocessing line in one flag: the 'cav26' family (NOT 'base'), plus --pbv-uts-mode=flip --pbv-preprocess-mw --pbv-rw-ac --pbv-sext-to-zext --pbv-rw-bool --pbv-shift-add-distrib --pbv-mask-slice=all --pbv-to-int-reduce-mods=all --pbv-mw-ext-norm --pbv-mw-shift-bitwise --pbv-mw-sign-idioms --pbv-mw-mask-facts --pbv-div-lemmas. Each of those is a default only, so any of them given explicitly on the command line wins."
+  help = "The tuned PBV preprocessing line in one flag: the 'cav26' family (NOT 'base'), plus --pbv-uts-mode=flip --pbv-rw-ac --pbv-rw-bool --pbv-shift-add-distrib --pbv-mask-slice=all --pbv-mw-ext-norm --pbv-mw-shift-bitwise --pbv-mw-sign-idioms --pbv-div-lemmas for the unconditional rules, and --learned-rewrite-rules=pbv,int for every conditional family they used to carry (all but shift-guard-elim). Each of those is a default only, so any of them given explicitly on the command line wins."
 [[option.mode.ALL_NO_BUG]]
   name = "all-no-bug"
   help = "Everything 'all' selects EXCEPT the 'cav26' rewrite family. The generated pbv-c26-* rules (and-one, and-allones, and-self) read only the first two operands of a pbvand without checking its arity, so a 3-ary pbvand loses operands and a valid formula can come back sat (e.g. `(distinct (pbvand t 1 (pbvmul s s)) (pbvand s t 1))` under --decision=stoponly). Every other flag of 'all' is set the same way, as a default only."
@@ -790,12 +745,36 @@ name   = "SMT Layer"
 [[option.mode.MULTIPLY_ONLY_REPORT]]
   name = "multiply-only-report"
   help = "Same pivot choice as 'multiply-only' (smallest exponent, multiply up), but also print the numbered power-instance report before applying."
+[[option.mode.MULTIPLY_ONLY_ADDING_INSTANCES]]
+  name = "multiply-only-adding-instances"
+  help = "Run 'multiply-only', then add the instance-relating lemmas L3 and L4 (see 'multiply-only-l3' and 'multiply-only-l4') for the same-base powers the merge could not fold. Side conditions must be entailed by the assertions, so the lemmas are always implied by the input. Formerly 'multiply-only-relate', which is kept as an alias."
+[[option.mode.MULTIPLY_ONLY_ADDING_INSTANCES_REPORT]]
+  name = "multiply-only-adding-instances-report"
+  help = "Same as 'multiply-only-adding-instances', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.DIV]]
+  name = "div"
+  help = "Within each group of same-base powers whose exponents differ by a constant, translate every instance to the GREATEST-exponent one, dividing down: b^(S+a) becomes b^(S+p) div b^(p-a) for the pivot offset p. Exact when the smaller exponent S+a is entailed non-negative and the base is non-zero (a numeral other than 0, or a symbolic base entailed >= 1 or <= -1); members failing either condition are left alone. The division loses the divisibility fact b^(p-a) | b^(S+p) that 'multiply-only' keeps, so measure it against that mode. Handles constant and symbolic bases (no report)."
+[[option.mode.DIV_REPORT]]
+  name = "div-report"
+  help = "Same as 'div', but also print the numbered power-instance report before applying."
+[[option.mode.DIV_ADDING_INSTANCES]]
+  name = "div-adding-instances"
+  help = "Run 'div', then add the instance-relating lemmas L3 and L4 (as in 'multiply-only-adding-instances') for the same-base powers the merge could not fold."
+[[option.mode.DIV_ADDING_INSTANCES_REPORT]]
+  name = "div-adding-instances-report"
+  help = "Same as 'div-adding-instances', but also print the numbered power-instance report and the emitted lemmas."
 [[option.mode.COMMON]]
   name = "common"
-  help = "Like 'multiply-only' but pivot on the MOST FREQUENT instance in each group instead of the smallest: larger powers are multiplied up, smaller powers are divided down by base^d. The division loses the divisibility fact base|base^n, so this is usually weaker than 'multiply-only' -- provided for A/B comparison (no report)."
+  help = "Like 'multiply-only' but pivot on the MOST FREQUENT instance in each group instead of the smallest: larger powers are multiplied up, smaller powers are divided down by base^d (only for a base that is non-zero, as in 'div'). The division loses the divisibility fact base|base^n, so this is usually weaker than 'multiply-only' -- provided for A/B comparison (no report)."
 [[option.mode.COMMON_REPORT]]
   name = "common-report"
   help = "Same pivot choice as 'common' (most frequent, divide down), but also print the numbered power-instance report before applying."
+[[option.mode.COMMON_ADDING_INSTANCES]]
+  name = "common-adding-instances"
+  help = "Run 'common', then add the instance-relating lemmas L3 and L4 (as in 'multiply-only-adding-instances') for the same-base powers the merge could not fold."
+[[option.mode.COMMON_ADDING_INSTANCES_REPORT]]
+  name = "common-adding-instances-report"
+  help = "Same as 'common-adding-instances', but also print the numbered power-instance report and the emitted lemmas."
 [[option.mode.MULTIPLY_ONLY_L3]]
   name = "multiply-only-l3"
   help = "Run 'multiply-only' first, then add only the L3 FACTORIZATION lemma for the powers it could not merge: for two surviving same-base powers b^x, b^y whose exponents the assertions order x <= y with a SYMBOLIC gap, assert b^y = b^x * b^(y-x) (plus b^(y-x) >= 1). Gives the solver the divisibility b^x | b^y. Any base, not just 2."
@@ -814,6 +793,12 @@ name   = "SMT Layer"
 [[option.mode.MULTIPLY_ONLY_L3_COMMON_L4_REPORT]]
   name = "multiply-only-l3-common-l4-report"
   help = "Same as 'multiply-only-l3-common-l4', but also print the numbered power-instance report and the emitted lemmas."
+[[option.mode.ADDING_INSTANCES]]
+  name = "adding-instances"
+  help = "Add the instance-relating lemmas L3 and L4 only, with NO merge first: every same-base power stays as it is, and pairs whose exponents the assertions order are related. What --exp-preprocess=add selects without reduce."
+[[option.mode.ADDING_INSTANCES_REPORT]]
+  name = "adding-instances-report"
+  help = "Same as 'adding-instances', but also print the numbered power-instance report and the emitted lemmas."
 [[option.mode.MULTIPLY_ONLY_L4]]
   name = "multiply-only-l4"
   help = "Run 'multiply-only' first, then add only the L4 STRICT MONOTONICITY lemma: for two surviving same-base powers b^x, b^y with x < y entailed and b >= 2, assert b^y >= b * b^x (plus b^(y-x) >= b). Unlike L3 this adds no new pow2 term beyond b^(y-x). Any base, not just 2."
@@ -822,10 +807,10 @@ name   = "SMT Layer"
   help = "Same as 'multiply-only-l4', but also print the numbered power-instance report and the emitted lemmas."
 [[option.mode.MULTIPLY_ONLY_RELATE]]
   name = "multiply-only-relate"
-  help = "Run 'multiply-only' first, then add BOTH L3 and L4 (see 'multiply-only-l3' and 'multiply-only-l4'). Side conditions must be entailed by the assertions, so the lemmas are always implied by the input."
+  help = "Old name of 'multiply-only-adding-instances', kept so existing scripts still run; identical behavior."
 [[option.mode.MULTIPLY_ONLY_RELATE_REPORT]]
   name = "multiply-only-relate-report"
-  help = "Same as 'multiply-only-relate', but also print the numbered power-instance report and the emitted relational lemmas."
+  help = "Old name of 'multiply-only-adding-instances-report', kept so existing scripts still run; identical behavior."
 
 [[option]]
   name       = "BVAndIntegerGranularity"

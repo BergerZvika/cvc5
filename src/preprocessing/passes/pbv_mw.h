@@ -11,7 +11,15 @@
  * ****************************************************************************
  *
  * Multi-width PBV rewrites, applied BEFORE the translation to NIA.
- * Enabled by --pbv-preprocess-mw.
+ *
+ * The rule engine is shared by two passes. pbv-mw runs the UNCONDITIONAL
+ * families, each behind its own --pbv-* flag. learned-rewrite-pbv (see
+ * learned_rewrite_pbv.h) runs the same engine with the CONDITIONAL rules
+ * switched on as well, selected by --learned-rewrite-rules, and replaces
+ * pbv-mw when it runs; the conditional bodies are in learned_rewrite_pbv.cpp
+ * and are reached through the lr* hooks below, called from the same
+ * positions they always held, so the two kinds still reach a common fixed
+ * point.
  */
 
 #ifndef CVC5__PREPROCESSING__PASSES__PBV_MW_H
@@ -24,6 +32,7 @@
 #include <vector>
 
 #include "preprocessing/passes/int_order_facts.h"
+#include "preprocessing/passes/learned_rewrite_rules.h"
 #include "preprocessing/preprocessing_pass.h"
 #include "preprocessing/preprocessing_pass_context.h"
 
@@ -63,8 +72,44 @@ class PbvMw : public PreprocessingPass
   PbvMw(PreprocessingPassContext* preprocContext);
 
  protected:
+  /**
+   * The engine under another pass name, with the conditional families of
+   * `cond` enabled (learned-rewrite-pbv).
+   */
+  PbvMw(PreprocessingPassContext* preprocContext,
+        const std::string& name,
+        const LearnedRewriteRules& cond);
+
   PreprocessingPassResult applyInternal(
       AssertionPipeline* assertionsToPreprocess) override;
+
+  /** The conditional families to run; all off for pbv-mw itself. */
+  LearnedRewriteRules d_cond;
+
+  // ---- conditional rules (--learned-rewrite-rules), learned_rewrite_pbv.cpp.
+  // Each returns n unchanged when no rule fires or its family is off.
+  /** T0: t[i:0] -> t when w(t) = k. */
+  Node lrTruncPushFull(Node n, TNode t, Node kw);
+  /** T1, T4, T5 on an admissible t = n[0]; kw = i + 1. */
+  Node lrTruncPushCut(Node n, TNode t, Node i, Node kw);
+  /** X1, X3. */
+  Node lrExtBitwise(Node n);
+  /** S1, S3. */
+  Node lrSextBv1(Node n);
+  /** I3. */
+  Node lrSextIdioms(Node n);
+  /** R1, R2. */
+  Node lrSignedRange(Node n);
+  /** W2, W4, W3. */
+  Node lrShiftBitwise(Node n);
+  /** G2a, G4. */
+  Node lrSignIdioms(Node n);
+  /** G5c for the summand n[i]. */
+  Node lrSignIdiomsAddIte(Node n, size_t i);
+  /** K1, K2, K3. */
+  Node lrMaskFacts(Node n);
+  /** F, E, E2, M2, M3, A/B. */
+  Node lrRules(Node n);
 
  private:
   /** Collect `(= (pbvsize x) V)` links from every assertion (CAUSE 2). */
@@ -95,7 +140,7 @@ class PbvMw : public PreprocessingPass
   bool widthPositive(TNode m);
 
   /** Order facts harvested from the assertions, for the `m >= 1` side
-   * condition of the sext-over-zext rule (--pbv-sext-to-zext). */
+   * condition of every conditional rule (--learned-rewrite-rules). */
   IntOrderFacts d_facts;
 
   /** Bottom-up rewrite of n. */
@@ -155,7 +200,7 @@ class PbvMw : public PreprocessingPass
   void bump(const char* rule);
 
   // ---- bitwise families (--pbv-mw-shift-bitwise, --pbv-mw-sign-idioms,
-  //      --pbv-mw-mask-facts) ------------------------------------------------
+  //      learned mask-facts) -------------------------------------------------------
   /** The three bitwise families at the top of n; returns n when none fires. */
   Node applyBitwise(Node n);
   /** Flatten, sort, dedupe and fold the constants of an and/or/xor chain. */

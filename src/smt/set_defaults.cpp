@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -49,6 +50,7 @@
 #include "options/strings_options.h"
 #include "options/theory_options.h"
 #include "options/uf_options.h"
+#include "preprocessing/passes/learned_rewrite_rules.h"
 #include "smt/logic_exception.h"
 #include "theory/theory.h"
 
@@ -238,6 +240,21 @@ std::vector<std::pair<std::string, std::string>> parsePbvMwList(
 
 void SetDefaults::setDefaultsPre(Options& opts)
 {
+  // Add `tokens` to --learned-rewrite-rules as a default: an explicitly given
+  // list is left alone, exactly as SET_AND_NOTIFY_IF_NOT_USER does for a flag.
+  auto addLearnedRewriteRules =
+      [this](Options& o, const std::string& tokens, const char* reason) {
+        if (o.smt.learnedRewriteRulesWasSetByUser)
+        {
+          return;
+        }
+        std::string& cur = o.write_smt().learnedRewriteRules;
+        std::string next =
+            cur == "none" || cur.empty() ? tokens : cur + "," + tokens;
+        notifyModifyOption(
+            options::smt::longName::learnedRewriteRules, next, reason);
+        cur = next;
+      };
   // --solve-bv-as-int=pbv is the tuned PBV configuration: the mode alone
   // selects the whole flag set below. Every entry is a DEFAULT only --
   // SET_AND_NOTIFY_IF_NOT_USER leaves an explicitly given option alone, so
@@ -257,19 +274,20 @@ void SetDefaults::setDefaultsPre(Options& opts)
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt,
         analyzeExpInstances,
-        options::AnalyzeExpInstancesMode::MULTIPLY_ONLY_RELATE,
+        options::AnalyzeExpInstancesMode::MULTIPLY_ONLY_ADDING_INSTANCES,
         reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvRwMw, options::PbvRwMwMode::CAV26, reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvMaskSlice, options::PbvMaskSliceMode::ALL, reason);
-    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
-        smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
+    // the conditional halves of the families above, and the mod reducer
+    addLearnedRewriteRules(
+        opts,
+        "preprocess-mw,sext-to-zext,shift-add-distrib,mask-slice,int",
+        reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         arith, piAndLemmaMode, options::PIAndLemmaMode::COMPLEMENT, reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
@@ -292,7 +310,8 @@ void SetDefaults::setDefaultsPre(Options& opts)
     bool doShiftGuardElim = false, doPartialMod = false;
     options::PbvMaskSliceMode maskSlice = options::PbvMaskSliceMode::NONE;
     options::PbvRwMwMode rwMw = options::PbvRwMwMode::NONE;
-    options::PbvReduceModsMode redMods = options::PbvReduceModsMode::NONE;
+    // the --learned-rewrite-rules spelling of the reduce-mods token
+    std::string redMods;
     // A mode-valued token: bare means 'all', otherwise the named family.
     auto modeArg = [&opts](const std::string& tok,
                            const std::string& val,
@@ -320,7 +339,7 @@ void SetDefaults::setDefaultsPre(Options& opts)
         doPreprocess = doSextToZext = doShiftAddDistrib = true;
         doAc = doBool = true;
         rwMw = options::PbvRwMwMode::BASE_CAV26;
-        redMods = options::PbvReduceModsMode::ALL;
+        redMods = "int";
         if (aggAll)
         {
           doNnf = doShiftZextMerge = doShiftGuardElim = doPartialMod = true;
@@ -366,12 +385,9 @@ void SetDefaults::setDefaultsPre(Options& opts)
       }
       else if (tok == "reduce-mods")
       {
-        redMods = modeArg(tok,
-                          val,
-                          options::PbvReduceModsMode::NONE,
-                          options::PbvReduceModsMode::BASE,
-                          options::PbvReduceModsMode::CAV26,
-                          options::PbvReduceModsMode::ALL);
+        redMods = modeArg(
+            tok, val, std::string(), std::string("reduce-mods"),
+            std::string("reduce-mods-width"), std::string("int"));
       }
       else
       {
@@ -382,10 +398,23 @@ void SetDefaults::setDefaultsPre(Options& opts)
       }
     }
     const char* reason = "--pbv-mw";
-    if (doPreprocess)
-      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
-    if (doSextToZext)
-      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
+    // The conditional families are --learned-rewrite-rules tokens now.
+    std::vector<std::string> lr;
+    if (doPreprocess) lr.push_back("preprocess-mw");
+    if (doSextToZext) lr.push_back("sext-to-zext");
+    if (doShiftAddDistrib) lr.push_back("shift-add-distrib");
+    if (maskSlice != options::PbvMaskSliceMode::NONE) lr.push_back("mask-slice");
+    if (doShiftGuardElim) lr.push_back("shift-guard-elim");
+    if (!redMods.empty()) lr.push_back(redMods);
+    if (!lr.empty())
+    {
+      std::string joined;
+      for (const std::string& t : lr)
+      {
+        joined += (joined.empty() ? "" : ",") + t;
+      }
+      addLearnedRewriteRules(opts, joined, reason);
+    }
     if (doShiftAddDistrib)
       SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
     if (doAc) SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
@@ -393,16 +422,137 @@ void SetDefaults::setDefaultsPre(Options& opts)
     if (doNnf) SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwNnf, true, reason);
     if (doShiftZextMerge)
       SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwShiftZextMerge, true, reason);
-    if (doShiftGuardElim)
-      SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftGuardElim, true, reason);
     if (doPartialMod)
       SET_AND_NOTIFY_IF_NOT_USER(smt, pbvToIntPartialMod, true, reason);
     if (maskSlice != options::PbvMaskSliceMode::NONE)
       SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvMaskSlice, maskSlice, reason);
     if (rwMw != options::PbvRwMwMode::NONE)
       SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvRwMw, rwMw, reason);
-    if (redMods != options::PbvReduceModsMode::NONE)
-      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, pbvToIntReduceMods, redMods, reason);
+  }
+
+  // The feature flags of the paper's configuration table. Each token sets the
+  // options behind its row as DEFAULTS, so an explicitly given underlying
+  // option wins; they run after --solve-bv-as-int=pbv and --pbv-mw, so they
+  // override the defaults those choose.
+  // `all` expands to `allTokens`, or to every token when that is empty.
+  auto parseFeatures = [](const std::string& list,
+                          const std::vector<std::string>& tokens,
+                          const char* optName,
+                          const std::vector<std::string>& allTokens = {}) {
+    std::set<std::string> out;
+    std::stringstream ss(list);
+    std::string tok;
+    while (std::getline(ss, tok, ','))
+    {
+      if (tok.empty() || tok == "none") continue;
+      if (tok == "all")
+      {
+        const std::vector<std::string>& a =
+            allTokens.empty() ? tokens : allTokens;
+        out.insert(a.begin(), a.end());
+        continue;
+      }
+      if (std::find(tokens.begin(), tokens.end(), tok) == tokens.end())
+      {
+        std::stringstream es;
+        es << "Unknown token '" << tok << "' in --" << optName
+           << "; see --help for the list.";
+        throw FatalOptionException(es.str());
+      }
+      out.insert(tok);
+    }
+    return out;
+  };
+  // --exp-solver: exp-rewrites, exp-lemmas, exp-phasing
+  {
+    std::set<std::string> f = parseFeatures(
+        opts.arith.expSolver, {"rewrites", "lemmas", "phasing"}, "exp-solver");
+    if (!f.empty())
+    {
+      const char* reason = "--exp-solver";
+      std::string lemmas;
+      auto addTok = [&lemmas](const char* t) {
+        lemmas += (lemmas.empty() ? "" : ",") + std::string(t);
+      };
+      if (f.count("lemmas"))
+      {
+        // --arith-exp-lemmas=all without phasing, const and unroll
+        addTok(
+            "symmetry,prime,induction,interpolation,compose,fuse,fuse-base,"
+            "fuse-model,mon,negone-parity,halving,neg-recip");
+      }
+      if (f.count("rewrites"))
+      {
+        addTok("const,unroll");
+        SET_AND_NOTIFY_IF_NOT_USER(arith, expBaseOrder, true, reason);
+      }
+      if (f.count("phasing"))
+      {
+        addTok("phasing");
+      }
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(arith, expLemmasMode, lemmas, reason);
+    }
+  }
+  // --exp-preprocess: exp-preprocessing reducing instances (one of the three
+  // merges multiply / div / common, plus shift normalization) and adding
+  // instances
+  {
+    std::set<std::string> f =
+        parseFeatures(opts.arith.expPreprocess,
+                      {"multiply", "div", "common", "add"},
+                      "exp-preprocess",
+                      {"multiply", "add"});
+    const bool mul = f.count("multiply") > 0;
+    const bool div = f.count("div") > 0;
+    const bool common = f.count("common") > 0;
+    const bool add = f.count("add") > 0;
+    if (mul + div + common > 1)
+    {
+      throw FatalOptionException(
+          "--exp-preprocess: multiply, div and common are alternative merges "
+          "of the same instances; give at most one.");
+    }
+    const bool reduce = mul || div || common;
+    const char* reason = "--exp-preprocess";
+    if (reduce || add)
+    {
+      using M = options::AnalyzeExpInstancesMode;
+      M m = mul      ? (add ? M::MULTIPLY_ONLY_ADDING_INSTANCES : M::MULTIPLY_ONLY)
+            : div    ? (add ? M::DIV_ADDING_INSTANCES : M::DIV)
+            : common ? (add ? M::COMMON_ADDING_INSTANCES : M::COMMON)
+                     : M::ADDING_INSTANCES;
+      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(smt, analyzeExpInstances, m, reason);
+    }
+    if (reduce)
+    {
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithPow2Norm, true, reason);
+    }
+    if (add)
+    {
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithRatIdentity, true, reason);
+    }
+  }
+  // --pbv-rewrites: the T_PBV rewrites without side conditions
+  if (opts.smt.pbvRewrites)
+  {
+    const char* reason = "--pbv-rewrites";
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvRwMw, options::PbvRwMwMode::CAV26, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwTruncPush, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwLowMask, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwExtBitwise, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextIdioms, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextBv1, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwShiftBitwise, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSignIdioms, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvMaskSlice, options::PbvMaskSliceMode::ALL, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvDivLemmas, true, reason);
   }
 
   // --pbv-rw-mw=all: the tuned PBV preprocessing line in one flag. The
@@ -417,19 +567,17 @@ void SetDefaults::setDefaultsPre(Options& opts)
                              : "--pbv-rw-mw=all-no-bug";
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvPreprocessMw, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAc, true, reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvSextToZext, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvShiftAddDistrib, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvMaskSlice, options::PbvMaskSliceMode::ALL, reason);
-    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
-        smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
     // the bitwise rewrite families of pbv-mw and the division lemmas
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwShiftBitwise, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSignIdioms, true, reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwMaskFacts, true, reason);
+    // every conditional family the flags above used to carry, and the mod
+    // reducer
+    addLearnedRewriteRules(opts, "pbv,int", reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvDivLemmas, true, reason);
     // Must stay before the --pbv-mw-ext-norm block below, which expands it.
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwExtNorm, true, reason);
@@ -444,7 +592,8 @@ void SetDefaults::setDefaultsPre(Options& opts)
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwExtBitwise, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextBv1, true, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSextIdioms, true, reason);
-    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwSignedRange, true, reason);
+    // their conditional rules, and the signed-range family (all conditional)
+    addLearnedRewriteRules(opts, "ext-norm", reason);
   }
 
   // --arith-exp-lemmas=all also selects the arithmetic preprocessing line.
@@ -464,11 +613,44 @@ void SetDefaults::setDefaultsPre(Options& opts)
       SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearch, 200, reason);
       SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearchSigned, true, reason);
       SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessEnum, 20000, reason);
-      // The reduce-mods post-pass of pbv-to-int runs on ANY `mod 2^k`, not
+      // The mod-2^k reducer (learned-rewrite) runs on ANY `mod 2^k`, not
       // only on translated PBV terms, so it also pays off on integer input
       // that is already a PBV translation (sat25-no-piand).
-      SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
-          smt, pbvToIntReduceMods, options::PbvReduceModsMode::ALL, reason);
+      addLearnedRewriteRules(opts, "int", reason);
+    }
+  }
+
+  // An explicitly given --learned-rewrite-rules naming the `int` token also
+  // selects the witness-search line. Only the user's own list counts, so the
+  // `int` that --solve-bv-as-int=pbv adds as a default does not trigger it.
+  if (opts.smt.learnedRewriteRulesWasSetByUser)
+  {
+    bool lrInt = false;
+    std::stringstream toks(opts.smt.learnedRewriteRules);
+    std::string tok;
+    while (std::getline(toks, tok, ','))
+    {
+      lrInt = lrInt || tok == "int";
+    }
+    if (lrInt)
+    {
+      const char* reason = "--learned-rewrite-rules=int";
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearch, 200, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessSearchSigned, true, reason);
+      SET_AND_NOTIFY_IF_NOT_USER(arith, arithWitnessEnum, 20000, reason);
+    }
+  }
+
+  // Validate --learned-rewrite-rules once every aggregate has added to it.
+  {
+    preprocessing::passes::LearnedRewriteRules lr;
+    std::string bad;
+    if (!lr.parse(opts.smt.learnedRewriteRules, bad))
+    {
+      std::stringstream ss;
+      ss << "Unknown token '" << bad
+         << "' in --learned-rewrite-rules; see --help for the list.";
+      throw FatalOptionException(ss.str());
     }
   }
 

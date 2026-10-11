@@ -383,8 +383,8 @@ void ExpSolver::checkFullRefine() {
   // whose first element is itself model-violating, which would hide exactly
   // the cross-base cases `mon` exists for.
   // Selectable either as the 'mon' token of --arith-exp-lemmas or with the
-  // standalone --arith-exp-mon-general boolean; the two are OR-ed. 'all' and
-  // 'pbv' both imply it.
+  // standalone --arith-exp-mon-general boolean, which is on by default; the
+  // two are OR-ed.
   bool genMon = options().arith.expMonGeneral || lsel.has("mon");
   if (genMon)
   {

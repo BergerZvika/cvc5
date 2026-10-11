@@ -142,12 +142,6 @@ PreprocessingPassResult PBVToInt::applyInternal(
     typeCheck(assertionsToPreprocess);
   }
 
-  // Post-pass on the NIA formula (opt-in): delete redundant `mod 2^k`.
-  if (options().smt.pbvToIntReduceMods != options::PbvReduceModsMode::NONE)
-  {
-    reduceRedundantPow2Mods(assertionsToPreprocess);
-  }
-
   // Compact: drop any `(assert true)` left behind by translations whose
   // bodies became tautological after substitution / lemma emission. We
   // gather the surviving assertions, clear, and push them back. This loses
@@ -334,52 +328,6 @@ void PBVToInt::typeCheck(AssertionPipeline* assertionsToPreprocess)
        << " width query is unsatisfiable.";
     throw LogicException(ss.str());
   }
-}
-
-void PBVToInt::reduceRedundantPow2Mods(
-    AssertionPipeline* assertionsToPreprocess)
-{
-  Pow2ModReducer reducer(d_preprocContext->getEnv());
-
-  // Phase 1 — harvest width-ordering facts from the whole assertion set. The
-  // ADM/RANGE lemmas pushed by addFinalizeAssertions are already in here, so
-  // `i < kappa(t)` and `kappa > 0` are available alongside the user's own
-  // width constraints.
-  std::vector<Node> all;
-  all.reserve(assertionsToPreprocess->size());
-  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
-  {
-    all.push_back((*assertionsToPreprocess)[i]);
-  }
-  reducer.harvest(all);
-
-  // Phase 2 — delete redundant mods.
-  for (size_t i = 0, sz = assertionsToPreprocess->size(); i < sz; ++i)
-  {
-    Node before = (*assertionsToPreprocess)[i];
-    Node after = reducer.reduce(before);
-    if (after != before)
-    {
-      assertionsToPreprocess->replace(i, after);
-      assertionsToPreprocess->ensureRewritten(i);
-    }
-  }
-  if (getenv("PBV_DEBUG_REDUCER") != nullptr)
-  {
-    std::cerr << "[reduce-mods] removed " << reducer.numRemoved() << " mod(s):";
-    for (const auto& [c, n] : reducer.caseCounts())
-    {
-      std::cerr << " case" << c << "=" << n;
-    }
-    std::cerr << std::endl;
-  }
-  Trace("pbv-to-int") << "pbv-to-int-reduce-mods: removed "
-                      << reducer.numRemoved() << " mod(s)";
-  for (const auto& [c, n] : reducer.caseCounts())
-  {
-    Trace("pbv-to-int") << "  case" << c << "=" << n;
-  }
-  Trace("pbv-to-int") << std::endl;
 }
 
 void PBVToInt::addSkolemDefinitions(const std::map<Node, Node>& skolems)

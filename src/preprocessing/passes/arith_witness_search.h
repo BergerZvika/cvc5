@@ -73,7 +73,7 @@ namespace passes {
  * success is checked by cvc5's own rewriter. It never derives `unsat`.
  *
  * This is a different mechanism from the vacuity route of
- * --arith-fermat-vacuity, which proves the hard equalities say nothing and
+ * --fermat-little-theorem, which proves the hard equalities say nothing and
  * deletes them. Here they are kept and simply satisfied. The two reach
  * overlapping but not identical sets: this one also gets `twn05`, which no
  * amount of vacuity reasoning touches, because nothing in it is vacuous.

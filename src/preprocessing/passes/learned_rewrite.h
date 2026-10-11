@@ -18,6 +18,7 @@
 #define CVC5__PREPROCESSING__PASSES__LEARNED_REWRITE_H
 
 #include "preprocessing/preprocessing_pass.h"
+#include "preprocessing/passes/learned_rewrite_rules.h"
 #include "preprocessing/preprocessing_pass_context.h"
 #include "theory/arith/bound_inference.h"
 #include "util/statistics_stats.h"
@@ -82,6 +83,17 @@ class LearnedRewrite : public PreprocessingPass
  protected:
   PreprocessingPassResult applyInternal(
       AssertionPipeline* assertionsToPreprocess) override;
+  /** The built-in rewrites with learned literals (--learned-rewrite). */
+  PreprocessingPassResult applyBuiltin(
+      AssertionPipeline* assertionsToPreprocess);
+  /**
+   * The integer conditional rewrites of --learned-rewrite-rules (the mod-2^k
+   * reducer), with side conditions decided against the assertions and the
+   * learned literals together.
+   */
+  void applyConditional(AssertionPipeline* assertionsToPreprocess);
+  /** The families selected by --learned-rewrite-rules. */
+  LearnedRewriteRules d_rules;
   /**
    * Apply rewrite with learned literals, traverses n.
    */

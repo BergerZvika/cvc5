@@ -11,16 +11,18 @@
  * ****************************************************************************
  *
  * Redundant `mod 2^k` elimination for the NIA formula produced by the
- * PBV-to-int translation.  Selected by --pbv-to-int-reduce-mods=MODE.
+ * PBV-to-int translation. Run by the learned-rewrite pass (after pbv-to-int),
+ * selected by the integer tokens of --learned-rewrite-rules; the side
+ * conditions are decided against the assertions plus the learned literals.
  *
  * ===========================================================================
- * MODES
+ * TOKENS
  * ===========================================================================
  *
- *   none    do nothing (default)
- *   base    cases 1-5 below            -- the original set
- *   cav26   groups A and B below       -- adapted from the parabit rule set
- *   all     both
+ *   reduce-mods         cases 1-5 below        -- the original set ('base')
+ *   reduce-mods-width   groups A and B below   -- adapted from parabit ('cav26')
+ *   shift-guard-elim    case 20
+ *   int                 reduce-mods,reduce-mods-width
  *
  * The split exists so the two families can be benchmarked against each other.
  * They differ in kind, not just in coverage: every base rule strips an inner
@@ -31,7 +33,7 @@
  * a weaker purification bound -- and is why the two are separable.
  *
  * ===========================================================================
- * THE CASES  (mode: base)
+ * THE CASES  (token: reduce-mods)
  * ===========================================================================
  *
  * Write M(x, e) for `x mod 2^e` and P(e) for `2^e`.  Every rewrite below is
@@ -78,7 +80,7 @@
  *       survives, and only because it IS case 2 (a nested mod remains).
  *
  * ===========================================================================
- * GROUP A - width bounds  (mode: cav26)
+ * GROUP A - width bounds  (token: reduce-mods-width)
  * ===========================================================================
  *
  * Everything here is carried by one function, widthOf(t), which returns a
@@ -109,7 +111,7 @@
  * constant.  A symbolic shift-amount width is declined rather than guessed.
  *
  * ===========================================================================
- * GROUP B - rewrites not rooted at a mod  (mode: cav26)
+ * GROUP B - rewrites not rooted at a mod  (token: reduce-mods-width)
  * ===========================================================================
  *
  * Case 11 - nested pow2 division                        [parabit 12]
@@ -160,16 +162,19 @@ namespace cvc5::internal {
 namespace preprocessing {
 namespace passes {
 
-Pow2ModReducer::Pow2ModReducer(Env& env)
-    : EnvObj(env), d_facts(env), d_base(false), d_cav26(false), d_numRemoved(0)
+Pow2ModReducer::Pow2ModReducer(Env& env,
+                               bool base,
+                               bool cav26,
+                               bool shiftGuardElim)
+    : EnvObj(env),
+      d_facts(env),
+      d_base(base),
+      d_cav26(cav26),
+      d_shiftGuardElim(shiftGuardElim),
+      d_numRemoved(0)
 {
   d_two = nodeManager()->mkConstInt(Rational(2));
   d_zero = nodeManager()->mkConstInt(Rational(0));
-  options::PbvReduceModsMode m = options().smt.pbvToIntReduceMods;
-  d_base = (m == options::PbvReduceModsMode::BASE
-            || m == options::PbvReduceModsMode::ALL);
-  d_cav26 = (m == options::PbvReduceModsMode::CAV26
-             || m == options::PbvReduceModsMode::ALL);
 }
 
 void Pow2ModReducer::bump(uint32_t caseNum)
@@ -290,7 +295,7 @@ Node Pow2ModReducer::reduceRec(TNode n)
 
 Node Pow2ModReducer::reduceTop(Node n)
 {
-  // Shift-guard elimination (--pbv-shift-guard-elim).
+  // Shift-guard elimination (--learned-rewrite-rules=shift-guard-elim).
   //
   // bvlshrSym/bvshlSym wrap their division/multiplication in guards against a
   // degenerate `2^e = 0`, which can only be taken when e is negative:
@@ -303,7 +308,7 @@ Node Pow2ModReducer::reduceTop(Node n)
   // two of them, the nested-division merge (a div 2^y) div 2^z -> a div 2^(y+z)
   // cannot match it and the surrounding mod cannot be dropped. parabit's
   // shr_def/shl_def carry no guard, which is why it merges these directly.
-  if (options().smt.pbvShiftGuardElim && n.getKind() == Kind::ITE
+  if (d_shiftGuardElim && n.getKind() == Kind::ITE
       && n.getNumChildren() == 3 && n[0].getKind() == Kind::EQUAL
       && n[0].getNumChildren() == 2)
   {
@@ -343,8 +348,12 @@ Node Pow2ModReducer::reduceTop(Node n)
   {
     return x;
   }
-  // Cases 1, 3, 4, 5: strip subsumed inner mods.
-  if (d_base)
+  // Cases 1, 3, 4, 5: strip subsumed inner mods. All of them need k >= 0: for
+  // k < 0, 2^k is 0, so the outer mod no longer truncates and an inner
+  // mod 2^m with k <= m is not subsumed by it. Every recursive call inside
+  // stripInner keeps k, or widens it to j+k with j >= 0 (case 5), so checking
+  // it once here covers the whole recursion.
+  if (d_base && d_facts.nonNeg(k))
   {
     Node nx = stripInner(x, k);
     if (nx != x)
@@ -672,10 +681,11 @@ Node Pow2ModReducer::stripInner(TNode x, TNode k)
   }
 
   // Case 5: (y mod 2^m) div 2^j, window [j+k-1 : j] must sit below m.
+  // Needs j >= 0 (k >= 0 is checked by the caller), else 2^j is 0.
   if ((kk == Kind::INTS_DIVISION || kk == Kind::INTS_DIVISION_TOTAL))
   {
     Node j;
-    if (isPow2(x[1], j) && isMod(x[0]))
+    if (isPow2(x[1], j) && isMod(x[0]) && d_facts.nonNeg(j))
     {
       Node m;
       Node need = nodeManager()->mkNode(Kind::ADD, j, Node(k));

@@ -11,7 +11,8 @@
  * ****************************************************************************
  *
  * Redundant `mod 2^k` elimination for the NIA formula produced by the
- * PBV-to-int translation.  Enabled by --pbv-to-int-reduce-mods.
+ * PBV-to-int translation. Run by learned-rewrite under the integer tokens
+ * of --learned-rewrite-rules (reduce-mods, reduce-mods-width, shift-guard-elim).
  */
 
 #ifndef CVC5__PREPROCESSING__PASSES__PBV_MOD_REDUCER_H
@@ -54,7 +55,12 @@ namespace passes {
 class Pow2ModReducer : protected EnvObj
 {
  public:
-  Pow2ModReducer(Env& env);
+  /**
+   * `base` enables cases 1-5 (--learned-rewrite-rules=reduce-mods), `cav26`
+   * group A and cases 11, 13 (reduce-mods-width), `shiftGuardElim` case 20
+   * (shift-guard-elim).
+   */
+  Pow2ModReducer(Env& env, bool base, bool cav26, bool shiftGuardElim);
 
   /** Collect width-ordering facts from every assertion. Call before reduce(). */
   void harvest(const std::vector<Node>& assertions);
@@ -140,6 +146,8 @@ class Pow2ModReducer : protected EnvObj
   bool d_base;
   /** Run the cav26 groups A and B (modes cav26, all). */
   bool d_cav26;
+  /** Case 20, the 2^e = 0 shift-guard elimination. */
+  bool d_shiftGuardElim;
 
   uint64_t d_numRemoved;
   std::map<uint32_t, uint64_t> d_caseCount;

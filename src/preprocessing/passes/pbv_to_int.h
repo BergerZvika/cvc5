@@ -19,7 +19,6 @@
 #include "context/cdhashmap.h"
 #include "context/cdo.h"
 #include "context/context.h"
-#include "preprocessing/passes/pbv_mod_reducer.h"
 #include "preprocessing/preprocessing_pass.h"
 #include "preprocessing/preprocessing_pass_context.h"
 #include "theory/pbv/int_blaster.h"
@@ -49,12 +48,6 @@ class PBVToInt : public PreprocessingPass
   // layer can reconstruct PBV values from the int model. Without these,
   // get-value on a PBV term dereferences a null NodeValue and crashes.
   void addSkolemDefinitions(const std::map<Node, Node>& skolems);
-
-  // --pbv-to-int-reduce-mods: post-pass over the translated NIA assertions
-  // that deletes `mod 2^k` operations made redundant by the width ordering.
-  // Runs after every assertion has been blasted and after the RANGE/ADM
-  // lemmas have been pushed, so the ordering facts it needs are all visible.
-  void reduceRedundantPow2Mods(AssertionPipeline* assertionsToPreprocess);
 
   /**
    * --pbv-type-check. Build the width-only query that decides whether the

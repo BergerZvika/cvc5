@@ -375,7 +375,8 @@
 ; ---------------------------------------------------------------------------
 ; NOTE: the extract-over-extend rules (A1/A2/B1/B2) are NOT here. Their side
 ; condition w(x) = i+1 cannot be decided syntactically, so they live in the
-; pbv-mw preprocessing pass (--pbv-preprocess-mw). See preprocessing/passes/pbv_mw.h.
+; learned-rewrite-pbv pass (--learned-rewrite-rules=preprocess-mw). See
+; preprocessing/passes/pbv_mw.h.
 ;
 ; Retired header   (--pbv-rw-mw, off by default)
 ;

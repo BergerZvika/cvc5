@@ -1,4 +1,4 @@
-; COMMAND-LINE: --pbv-mw-shift-bitwise --pbv-mw-sign-idioms --pbv-mw-mask-facts
+; COMMAND-LINE: --pbv-mw-shift-bitwise --pbv-mw-sign-idioms --learned-rewrite-rules=shift-bitwise,sign-idioms,mask-facts
 ; EXPECT: sat
 ; (x >> c) << c drops the low bits of x: satisfiable, and the rules must keep
 ; it so (W2 gives x & (ones << c), which differs from x).

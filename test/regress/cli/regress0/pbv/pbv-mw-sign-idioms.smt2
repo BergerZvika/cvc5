@@ -1,4 +1,4 @@
-; COMMAND-LINE: --pbv-mw-sign-idioms
+; COMMAND-LINE: --pbv-mw-sign-idioms --learned-rewrite-rules=sign-idioms
 ; EXPECT: unsat
 ; Select_575a: ite(X >s -1, C1, C2) = ((X >>s (w-1)) & (C2 - C1)) + C1.
 ; G3 reads the sign broadcast as ite(X <s 0, ones, 0), G4/G5 push the and and

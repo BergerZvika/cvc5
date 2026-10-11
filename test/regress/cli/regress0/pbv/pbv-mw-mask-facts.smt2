@@ -1,4 +1,4 @@
-; COMMAND-LINE: --pbv-mw-mask-facts
+; COMMAND-LINE: --learned-rewrite-rules=mask-facts
 ; EXPECT: unsat
 ; AndOrXor_537: C+1 is a power of two (C a low mask), so X >u C exactly when X
 ; has a bit above C (K1).

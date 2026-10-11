@@ -1,4 +1,4 @@
-; COMMAND-LINE: --pbv-mw-shift-bitwise
+; COMMAND-LINE: --pbv-mw-shift-bitwise --learned-rewrite-rules=shift-bitwise
 ; EXPECT: unsat
 ; InstCombineShift440: (Y ^ ((X >> C) & C2)) << C = (X & (C2 << C)) ^ (Y << C).
 ; W1 distributes the shift, W2 turns (X >> C) << C into X & (ones << C), W3
