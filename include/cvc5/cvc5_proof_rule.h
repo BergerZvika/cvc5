@@ -4980,6 +4980,12 @@ enum ENUM(ProofRewriteRule)
   EVALUE(EXP_SHL_PAST),
   /** Auto-generated from RARE rule exp-shl-past-single */
   EVALUE(EXP_SHL_PAST_SINGLE),
+  /** Auto-generated from RARE rule piand-nonpos-width */
+  EVALUE(PIAND_NONPOS_WIDTH),
+  /** Auto-generated from RARE rule piand-ones-left */
+  EVALUE(PIAND_ONES_LEFT),
+  /** Auto-generated from RARE rule piand-ones-right */
+  EVALUE(PIAND_ONES_RIGHT),
 // ${rules}$
 #ifdef CVC5_API_USE_C_ENUMS
   // must be last entry

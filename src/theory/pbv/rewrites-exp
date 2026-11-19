@@ -5,10 +5,10 @@
 ;
 ; Compiled at build time by src/theory/pbv/generate_rewriter.py --profile exp
 ; into theory_exp_rewriter.cpp, and applied by the arith rewriter under
-; --arith-exp-rare-rewrites (off by default): for EXP terms in
-; ArithRewriter::postRewriteExp, after constant evaluation and BEFORE the
-; hand-written EXP rewrites there; for div/mod terms before the hand-written
-; div/mod rewrites. Like every RARE file, the rules are also part of the proof
+; --arith-exp-rare-rewrites (on by default): for EXP terms in
+; ArithRewriter::postRewriteExp, after constant evaluation (these rules ARE the
+; EXP rewriter; there are no hand-written EXP rules); for div/mod terms before
+; the hand-written div/mod rewrites. Like every RARE file, the rules are also part of the proof
 ; rewrite database. These rules are the paper's Table `tab:exp-rewrites`
 ; (generated into tables/rr-exp.tex, proved in Lean in RareExp.lean).
 ;

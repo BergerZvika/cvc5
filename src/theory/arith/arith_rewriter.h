@@ -41,11 +41,8 @@ class ArithRewriter : public TheoryRewriter
                 OperatorElim& oe,
                 bool expertEnabled = true,
                 const std::string& expRewriteMode = "none",
-                uint64_t expRewriteUnrollBound = 2,
-                const std::string& expLemmasMode = "none",
-                bool piAndOnes = false,
-                bool piandRare = false,
-                bool expRare = false);
+                bool piandRare = true,
+                bool expRare = true);
   RewriteResponse preRewrite(TNode n) override;
   RewriteResponse postRewrite(TNode n) override;
   /**
@@ -146,26 +143,12 @@ class ArithRewriter : public TheoryRewriter
   OperatorElim& d_opElim;
   /** Whether we permit reasoning about expert extensions of arithmetic */
   bool d_expertEnabled;
-  /** --piand-ones-rewrite: fold piand(k,x,2^k-1) at symbolic k */
-  bool d_piAndOnes;
   /** --piand-rare-rewrites: apply the rules of pbv/rewrites-piand */
   bool d_piandRare;
   /** --arith-exp-rare-rewrites: apply the rules of pbv/rewrites-exp */
   bool d_expRare;
-  /** Whether a is syntactically 2^k-1 (d_piAndOnes) */
-  bool isPIAndOnes(TNode a, TNode k) const;
   /** Which extra EXP rewrite schemas to fire (default NONE). */
   ExpFeatureSet d_expRewriteMode;
-  /**
-   * The --arith-exp-lemmas selection. Only the 'const' and 'unroll' tokens are
-   * read from it, and they are OR-ed with the same tokens on
-   * --arith-exp-rewrites; no other rewrite schema can be selected from this
-   * axis. In particular 'fuse-base' names a lemma family there and must not
-   * turn the rewrite of the same name on.
-   */
-  ExpFeatureSet d_expLemmasMode;
-  /** Upper bound for the bounded-unroll EXP rewrite. */
-  uint64_t d_expRewriteUnrollBound;
 }; /* class ArithRewriter */
 
 }  // namespace arith

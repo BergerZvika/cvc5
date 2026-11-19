@@ -125,20 +125,14 @@ ArithRewriter::ArithRewriter(NodeManager* nm,
                              OperatorElim& oe,
                              bool expertEnabled,
                              const std::string& expRewriteMode,
-                             uint64_t expRewriteUnrollBound,
-                             const std::string& expLemmasMode,
-                             bool piAndOnes,
                              bool piandRare,
                              bool expRare)
     : TheoryRewriter(nm),
       d_opElim(oe),
       d_expertEnabled(expertEnabled),
-      d_piAndOnes(piAndOnes),
       d_piandRare(piandRare),
       d_expRare(expRare),
-      d_expRewriteMode(expRewriteMode, ExpFeatureAxis::REWRITES),
-      d_expLemmasMode(expLemmasMode, ExpFeatureAxis::LEMMAS),
-      d_expRewriteUnrollBound(expRewriteUnrollBound)
+      d_expRewriteMode(expRewriteMode, ExpFeatureAxis::REWRITES)
 {
   registerProofRewriteRule(ProofRewriteRule::ARITH_POW_ELIM,
                            TheoryRewriteCtx::PRE_DSL);
@@ -1257,138 +1251,44 @@ RewriteResponse ArithRewriter::postRewriteIAnd(TNode t)
 }
 
 
-bool ArithRewriter::isPIAndOnes(TNode a, TNode k) const
-{
-  auto isTwoK = [&k](TNode p) {
-    return (p.getKind() == Kind::EXP && p[0].isConst()
-            && p[0].getConst<Rational>() == Rational(2) && p[1] == k)
-           || (p.getKind() == Kind::POW2 && p[0] == k);
-  };
-  // (+ (- 1) 2^k)
-  if (a.getKind() == Kind::ADD && a.getNumChildren() == 2)
-  {
-    for (size_t j = 0; j < 2; j++)
-    {
-      if (a[j].isConst() && a[j].getConst<Rational>() == Rational(-1)
-          && isTwoK(a[1 - j]))
-      {
-        return true;
-      }
-    }
-  }
-  // (mod -1 2^k), (mod 2^k-1 2^k)
-  if ((a.getKind() == Kind::INTS_MODULUS_TOTAL
-       || a.getKind() == Kind::INTS_MODULUS)
-      && isTwoK(a[1]))
-  {
-    return (a[0].isConst() && a[0].getConst<Rational>() == Rational(-1))
-           || isPIAndOnes(a[0], k);
-  }
-  return false;
-}
-
 RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
 {
-  // std::cout << "piand: " << t << std::endl;
-   Assert(t.getKind() == Kind::PIAND);
-   NodeManager* nm = d_nm;
-   // Rules of src/theory/pbv/rewrites-piand, compiled at build time.
-   if (d_piandRare)
-   {
-     Node r = pbv::rewritePiandRare(nm, t);
-     if (!r.isNull())
-     {
-       return RewriteResponse(REWRITE_AGAIN_FULL, r);
-     }
-   }
-   // simplifications involving constants
-   if(t[0].isConst() && (t[0].getConst<Rational>().sgn() == 0 || t[0].getConst<Rational>().sgn() == -1)) {
-      return RewriteResponse(REWRITE_DONE, rewriter::mkConst(d_nm, Rational(0)));
-   }
-   if (d_piAndOnes)
-   {
-     for (size_t i = 1; i < 3; i++)
-     {
-       if (isPIAndOnes(t[i], t[0]))
-       {
-         // ((_ piand k) x 2^k-1) ---> (ite (> k 0) (mod x 2^k) 0)
-         // with 2^k-1 spelled any way the rewriter leaves it at symbolic k
-         // (--piand-ones-rewrite). The mod keeps the masking, as in the
-         // constant-k maxsign rule below; piand is 0 at k <= 0.
-         Node other = t[3 - i];
-         Node twok = nm->mkNode(Kind::EXP, nm->mkConstInt(Rational(2)), t[0]);
-         Node ret = nm->mkNode(
-             Kind::ITE,
-             nm->mkNode(Kind::GT, t[0], nm->mkConstInt(Rational(0))),
-             nm->mkNode(Kind::INTS_MODULUS_TOTAL, other, twok),
-             nm->mkConstInt(Rational(0)));
-         return RewriteResponse(REWRITE_AGAIN_FULL, ret);
-       }
-     }
-   }
-    for (unsigned i = 1; i < 3; i++)
+  Assert(t.getKind() == Kind::PIAND);
+  NodeManager* nm = d_nm;
+  // The rules of src/theory/pbv/rewrites-piand, compiled at build time
+  // (--piand-rare-rewrites, on by default). They are the whole piand
+  // rewriter: below is only evaluation and argument ordering.
+  if (d_piandRare)
+  {
+    Node r = pbv::rewritePiandRare(nm, t);
+    if (!r.isNull())
     {
-      if (!t[i].isConst())
-      {
-        continue;
-      }
-      if (t[i].getConst<Rational>().sgn() == 0)
-      {
-        // ((_ piand k) 0 y) ---> 0
-        return RewriteResponse(REWRITE_DONE, rewriter::mkConst(d_nm, Rational(0)));
-      }
-      if(!t[0].isConst()) {
-        continue;
-      }
-      // size_t bsize = std::stoul(t[0].toString());
-      size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
-      Node twok = nm->mkConstInt(Rational(Integer(2).pow(bsize)));
-      Node maxsign = nm->mkConstInt(Rational(Integer(2).pow(bsize) - 1));
-      if (t[i].getConst<Rational>().getNumerator() == maxsign.getConst<Rational>().getNumerator())
-      {
-        // ((_ piand k) 111...1 y) ---> (mod y 2^k)
-        //
-        // The mod is not optional. piand masks both arguments to their low k
-        // bits -- which is what the all-constant branch below computes, via
-        // int_to_bv -- so dropping it is only correct for y already in
-        // [0, 2^k). Returning a bare y made the rewriter contradict itself on
-        // constants: piand(2,7,7) evaluated to 3 through the branch below
-        // while piand(2,3,7) evaluated to 7 through this one.
-        Node other = (i == 1) ? t[2] : t[1];
-        Node ret = nm->mkNode(Kind::INTS_MODULUS_TOTAL, other, twok);
-        return RewriteResponse(REWRITE_AGAIN, ret);
-      }
+      return RewriteResponse(REWRITE_AGAIN_FULL, r);
     }
-    // if constant, we eliminate
-    if (t[0].isConst() && t[1].isConst() && t[2].isConst())
+  }
+  // Evaluation of an all-constant term.
+  if (t[0].isConst() && t[1].isConst() && t[2].isConst())
+  {
+    if (t[0].getConst<Rational>().sgn() <= 0)
     {
-      size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
-      Node iToBvop = nm->mkConst(IntToBitVector(bsize));
-      Node arg1 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[1]);
-      Node arg2 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[2]);
-      Node bvand = nm->mkNode(Kind::BITVECTOR_AND, arg1, arg2);
-      Node ret = nm->mkNode(Kind::BITVECTOR_UBV_TO_INT, bvand);
-      return RewriteResponse(REWRITE_AGAIN_FULL, ret);
+      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(0)));
     }
-    else if (t[1] > t[2])
-    {
-      // ((_ piand k) x y) ---> ((_ piand k) y x) if x > y by node ordering
-      Node ret = nm->mkNode(Kind::PIAND, t[0], t[2], t[1]);
-      return RewriteResponse(REWRITE_AGAIN, ret);
-    }
-    else if (t[1] == t[2])
-    {
-      // ((_ piand k) x x) ---> (mod x 2^k)
-      // As above, the mod carries the masking and cannot be dropped: x need
-      // not be below 2^k. Spell the modulus as (** 2 k) rather than POW2(k):
-      // the PBV translation and the PIAND lemmas both use EXP by default, and
-      // a POW2 term here would be a second, unrelated encoding of 2^k that the
-      // solver then has to connect back to the EXP one.
-      Node twok = nm->mkNode(Kind::EXP, nm->mkConstInt(Rational(2)), t[0]);
-      Node ret = nm->mkNode(Kind::INTS_MODULUS_TOTAL, t[1], twok);
-      return RewriteResponse(REWRITE_AGAIN, ret);
-    }
-   return RewriteResponse(REWRITE_DONE, t);
+    size_t bsize = t[0].getConst<Rational>().getNumerator().toUnsignedInt();
+    Node iToBvop = nm->mkConst(IntToBitVector(bsize));
+    Node arg1 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[1]);
+    Node arg2 = nm->mkNode(Kind::INT_TO_BITVECTOR, iToBvop, t[2]);
+    Node bvand = nm->mkNode(Kind::BITVECTOR_AND, arg1, arg2);
+    Node ret = nm->mkNode(Kind::BITVECTOR_UBV_TO_INT, bvand);
+    return RewriteResponse(REWRITE_AGAIN_FULL, ret);
+  }
+  // Normal form: ((_ piand k) x y) ---> ((_ piand k) y x) if x > y by node
+  // ordering.
+  if (t[1] > t[2])
+  {
+    Node ret = nm->mkNode(Kind::PIAND, t[0], t[2], t[1]);
+    return RewriteResponse(REWRITE_AGAIN, ret);
+  }
+  return RewriteResponse(REWRITE_DONE, t);
 }
 
 RewriteResponse ArithRewriter::postRewriteExp(TNode t)
@@ -1410,8 +1310,9 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
       return RewriteResponse(REWRITE_DONE, ret);
     }
   }
-
-  // Rules of src/theory/pbv/rewrites-exp, compiled at build time.
+  // The rules of src/theory/pbv/rewrites-exp, compiled at build time
+  // (--arith-exp-rare-rewrites, on by default). They are the whole EXP
+  // rewriter besides the constant evaluation above.
   if (d_expRare)
   {
     Node r = pbv::rewriteExpRare(nm, t);
@@ -1420,98 +1321,6 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
       return RewriteResponse(REWRITE_AGAIN_FULL, r);
     }
   }
-
-  // Optional partial-constant rewrites gated by --arith-exp-rewrites.
-  // These drop EXP nodes from the term graph before the nl-ext solver
-  // ever sees them.
-  const ExpFeatureSet& erm = d_expRewriteMode;
-  // 'const' and 'unroll' are the two schemas that can also be named on
-  // --arith-exp-lemmas, and the two axes are OR-ed. Only these two: every other
-  // rewrite schema stays rewrite-axis only, and in particular 'fuse-base' names
-  // a lemma family on the lemma axis, so it must not turn the rewrite on.
-  // Note this makes the lemma-axis 'all' imply both, since 'all' there means
-  // all; on the rewrite axis 'unroll' stays explicit-only.
-  const ExpFeatureSet& elm = d_expLemmasMode;
-  // 'const-compose' predates the removal of the compose rewrite; it now
-  // selects the same schemas as plain 'const'.
-  bool doConst = erm.has("const") || erm.has("const-compose")
-                 || elm.has("const") || elm.has("const-compose");
-  // On the REWRITE axis 'unroll' is never implied by 'all': it can blow up term
-  // size, so it must be named explicitly there.
-  bool doUnroll = erm.has("unroll") || elm.has("unroll");
-
-  // NOTE: exponent composition -- EXP(EXP(x,y),z) -> EXP(x, y*z) -- used to be
-  // applied here behind --arith-exp-rewrites=compose. It is UNSOUND as an
-  // unguarded rewrite under this solver's EXP semantics: the EIA argument
-  // (x^|y|)^|z| = x^|y*z| reads a negative exponent as its absolute value,
-  // while here a negative exponent gives 1 div x^|t|. For x = y = z = -6 the
-  // left side is EXP(0,-6) = 0 and the right side is (-6)^36, so the rewrite
-  // turned a satisfiable assertion into `unsat`. The identity needs
-  // y >= 0 /\ z >= 0, which a syntactic rewriter cannot discharge -- so it now
-  // lives only as the guarded lemma --arith-exp-lemmas=compose, which keeps
-  // the term and states its antecedent. See ExpSolver::checkComposeRefine.
-
-  if (doConst)
-  {
-    // EXP(s, 0) -> 1
-    if (t[1].isConst() && t[1].getConst<Rational>().isZero())
-    {
-      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(1)));
-    }
-    // EXP(s, 1) -> s
-    if (t[1].isConst() && t[1].getConst<Rational>() == Rational(1))
-    {
-      return RewriteResponse(REWRITE_AGAIN, t[0]);
-    }
-    // EXP(1, t) -> 1
-    if (t[0].isConst() && t[0].getConst<Rational>() == Rational(1))
-    {
-      return RewriteResponse(REWRITE_DONE, nm->mkConstInt(Rational(1)));
-    }
-  }
-
-  if (doUnroll && t[1].isConst())
-  {
-    // SwInE Sect. 4.1, rewrite rule 1, under this solver's EXP semantics:
-    //
-    //   EXP(s, c)  ->  s * ... * s            (c copies)   for 2 <= c <= B
-    //
-    // POSITIVE constant exponents ONLY. c in {0, 1} is left to the 'const'
-    // schema above, and negative constants are deliberately not unrolled.
-    //
-    // The paper's EIA reads exp(x,c) as x^|c| and so unrolls a negative
-    // constant to the same product. Here exp(x,c) is 1 div x^|c| for c < 0,
-    // which would have to be emitted as a division -- and that is not safe as
-    // a rewrite, because unrolling DELETES the EXP node and with it every
-    // axiom that constrains the term:
-    //
-    //   * with the partial INTS_DIVISION, `1 div s` is unconstrained at s = 0
-    //     while exp(0,c) is 0, so `s = 0 /\ exp(s,-1) = -1` came back `sat`
-    //     though it is unsat;
-    //   * with INTS_DIVISION_TOTAL that particular case is pinned, but one
-    //     side of a goal then lives as a division term while the other stays
-    //     an EXP term, and the solver relates the two only in some cases --
-    //     `s >= 0 /\ t < 0 /\ exp(s,t) != exp(s,-1)` still came back `sat`,
-    //     with a model assigning both terms 0.
-    //
-    // Leaving the negative case alone keeps the EXP node, so neg-abs
-    // (|s| > 1 => 0), bnd4 (s = 1 => 1), neg-one (s = -1) and bnd3 (s = 0)
-    // continue to define it -- together they already cover every case of a
-    // negative exponent. --arith-exp-neg-recip is the flag for relating
-    // exp(s,t) to 1 div exp(s,-t) as a LEMMA, which keeps the term.
-    const Rational& r = t[1].getConst<Rational>();
-    if (r.isIntegral())
-    {
-      Integer ci = r.getNumerator();
-      if (ci >= Integer(2) && ci <= Integer(d_expRewriteUnrollBound))
-      {
-        uint64_t c = ci.toUnsignedInt();
-        return RewriteResponse(
-            REWRITE_AGAIN, nm->mkNode(Kind::MULT, std::vector<Node>(c, t[0])));
-      }
-    }
-  }
-
   return RewriteResponse(REWRITE_DONE, t);
 }
 

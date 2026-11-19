@@ -2,8 +2,9 @@
 ;
 ; Compiled at build time by src/theory/pbv/generate_rewriter.py --profile piand
 ; into theory_piand_rewriter.cpp, and applied by ArithRewriter::postRewritePIAnd
-; under --piand-rare-rewrites (off by default), BEFORE the hand-written PIAND
-; rules there. Like every RARE file, the rules are also part of the proof
+; under --piand-rare-rewrites (on by default). These rules ARE the piand
+; rewriter: postRewritePIAnd otherwise only evaluates all-constant terms and
+; orders the two arguments by node id. Like every RARE file, the rules are also part of the proof
 ; rewrite database.
 ;
 ; Semantics: (piand k x y) = 0 if k <= 0, and otherwise the bitwise AND of the
@@ -19,6 +20,18 @@
 ; never fire, and the generator stops the build instead.
 
 ; ---------------------------------------------------------------------------
+; Non-positive width
+; ---------------------------------------------------------------------------
+
+; piand is 0 at k <= 0 by definition. Conditions are evaluated, so this fires
+; only for a numeral k.
+(define-cond-rule piand-nonpos-width
+  ((k Int) (x Int) (y Int))
+  (<= k 0)
+  (piand k x y)
+  0)
+
+; ---------------------------------------------------------------------------
 ; Annihilation
 ; ---------------------------------------------------------------------------
 
@@ -32,6 +45,24 @@
   ((k Int) (x Int))
   (piand k x 0)
   0)
+
+; ---------------------------------------------------------------------------
+; All-ones mask
+; ---------------------------------------------------------------------------
+
+; (2^k-1) & y = y mod 2^k for k > 0. The mod is not optional: y need not be
+; below 2^k. Evaluated condition, so it fires for numerals k and c only.
+(define-cond-rule piand-ones-left
+  ((k Int) (c Int) (y Int))
+  (and (> k 0) (= c (- (** 2 k) 1)))
+  (piand k c y)
+  (mod_total y (** 2 k)))
+
+(define-cond-rule piand-ones-right
+  ((k Int) (x Int) (c Int))
+  (and (> k 0) (= c (- (** 2 k) 1)))
+  (piand k x c)
+  (mod_total x (** 2 k)))
 
 ; ---------------------------------------------------------------------------
 ; Idempotence
