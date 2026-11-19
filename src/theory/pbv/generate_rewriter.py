@@ -2,17 +2,33 @@
 ###############################################################################
 # generate_rewriter.py
 #
-# Parses src/theory/pbv/rewrites (RARE DSL) and emits two C++ files:
+# Parses a RARE rewrites file of the PBV theory and emits two C++ files. The
+# --profile selects which:
 #
-#   theory_pbv_rewriter.h   – stable class header (TheoryPbvRewriter)
-#   theory_pbv_rewriter.cpp – auto-generated implementation (RW_B, Appendix A)
+#   pbv    src/theory/pbv/rewrites        -> theory_pbv_rewriter.{h,cpp}
+#          class TheoryPbvRewriter, the theory rewriter of PBV (RW_B,
+#          Appendix A of the paper below)
+#   piand  src/theory/pbv/rewrites-piand  -> theory_piand_rewriter.{h,cpp}
+#          free function pbv::rewritePiandRare, called by
+#          ArithRewriter::postRewritePIAnd (--piand-rare-rewrites)
+#   exp    src/theory/pbv/rewrites-exp    -> theory_exp_rewriter.{h,cpp}
+#          free function pbv::rewriteExpRare, called by
+#          ArithRewriter::postRewriteExp (--arith-exp-rare-rewrites)
+#
+# The piand and exp kinds belong to the arithmetic theory, so their rules
+# cannot live in a TheoryRewriter of their own; the generated function returns
+# the rewritten node, or a null node when no rule fires, and the arith rewriter
+# decides what to do with it.
 #
 # from: "Bit-Precise Reasoning with Parametric Bit-Vectors"
 #       Berger, Zohar, Niemetz, Preiner, Reynolds, Barrett, Tinelli (SAT 2025)
 #
+# Both files are build products: the build writes them to build/src/theory/pbv
+# and neither belongs in the source tree.
+#
 # Usage (from the cvc5 source root):
-#   python3 src/theory/pbv/generate_rewriter.py
-#   python3 src/theory/pbv/generate_rewriter.py --output-dir /path/to/build/src/theory
+#   python3 src/theory/pbv/generate_rewriter.py --output-dir /path/to/dir
+#   python3 src/theory/pbv/generate_rewriter.py --profile piand --output-dir DIR
 ###############################################################################
 
 import argparse
@@ -32,16 +48,15 @@ if str(REWRITER_DIR) not in sys.path:
 
 try:
     from rw_parser import Parser
-    from node import (Op, Node, Sort, BaseSort, Var, CBool, CInt, CRational,
-                      CString, App, Placeholder)
+    from node import Op, Var, CBool, CInt, CRational, CString, App, Placeholder
     from rule import Rule
+    from mkrewrites import gen_kind, gen_mk_node, validate_rule
 except ImportError as exc:
     sys.exit(
         f"ERROR: Cannot import cvc5 rewriter modules from {REWRITER_DIR}.\n"
         f"Underlying error: {exc}"
     )
 
-REWRITES_FILE = SCRIPT_DIR / "rewrites"
 
 ###############################################################################
 # LHS structural walker
@@ -59,6 +74,7 @@ REWRITES_FILE = SCRIPT_DIR / "rewrites"
 # Kinds that take two OR MORE operands (kinds.toml: children = "2:").
 NARY_KINDS = {
     "PBV_AND", "PBV_OR", "PBV_XOR", "PBV_ADD", "PBV_MULT", "PBV_CONCAT",
+    "ADD", "MULT", "NONLINEAR_MULT", "AND", "OR",
 }
 
 
@@ -78,6 +94,14 @@ def walk_lhs(pattern, accessor: str, var_ctx: dict, guards: list):
             f"{accessor}.getConst<Rational>() == Rational({pattern.val}))")
         return
 
+    if (isinstance(pattern, App) and pattern.op == Op.NEG
+            and isinstance(pattern.children[0], CInt)):
+        # The rewritten form of (- c) is the constant -c, never a NEG node.
+        guards.append(
+            f"({accessor}.isConst() && "
+            f"{accessor}.getConst<Rational>() == Rational(-{pattern.children[0].val}))")
+        return
+
     if isinstance(pattern, (CBool, CRational, CString)):
         # For completeness – not expected in PBV rules
         guards.append(f"({accessor} /* literal-guard */ )")
@@ -85,11 +109,11 @@ def walk_lhs(pattern, accessor: str, var_ctx: dict, guards: list):
 
     if isinstance(pattern, App):
         if accessor != "node":
-            guards.append(f"({accessor}.getKind() == Kind::{pattern.op.kind})")
+            guards.append(f"({accessor}.getKind() == Kind::{gen_kind(pattern.op)})")
         # An n-ary operator matches only with the pattern's exact arity:
         # without this, `(pbvadd x 0)` would match `(pbvadd x 0 z)` through
         # node[0]/node[1] and the rewrite would silently drop z.
-        if pattern.op.kind in NARY_KINDS:
+        if gen_kind(pattern.op) in NARY_KINDS:
             guards.append(
                 f"({accessor}.getNumChildren() == {len(pattern.children)})")
         for idx, child in enumerate(pattern.children):
@@ -108,40 +132,21 @@ def walk_lhs(pattern, accessor: str, var_ctx: dict, guards: list):
 ###############################################################################
 
 def node_to_cpp(expr, var_ctx: dict) -> str:
-    if isinstance(expr, Var):
-        if expr in var_ctx:
-            return var_ctx[expr]
-        return expr.name  # fallback (should not happen)
+    """
+    Build a term with the proof generator's gen_mk_node: its definitions map
+    gives each variable the accessor that matched it, such as node[1][0].
+    """
+    check_vars_bound(expr, var_ctx)
+    return gen_mk_node(var_ctx, expr)
 
-    if isinstance(expr, CBool):
-        return "nm->mkConst(true)" if expr.val else "nm->mkConst(false)"
 
-    if isinstance(expr, CInt):
-        return f"nm->mkConstInt(Rational({expr.val}))"
-
-    if isinstance(expr, CRational):
-        return f'nm->mkConstReal(internal::Rational("{expr.val}"))'
-
-    if isinstance(expr, CString):
-        return f'nm->mkConst(String("{expr.val}"))'
-
-    if isinstance(expr, App):
-        if expr.op == Op.NOT:
-            return f"nm->mkNode(Kind::NOT, {{ {node_to_cpp(expr.children[0], var_ctx)} }})"
-        if expr.op == Op.AND:
-            args = ", ".join(node_to_cpp(c, var_ctx) for c in expr.children)
-            return f"nm->mkNode(Kind::AND, {{ {args} }})"
-        if expr.op == Op.OR:
-            args = ", ".join(node_to_cpp(c, var_ctx) for c in expr.children)
-            return f"nm->mkNode(Kind::OR, {{ {args} }})"
-        if expr.op == Op.EQ:
-            args = ", ".join(node_to_cpp(c, var_ctx) for c in expr.children)
-            return f"nm->mkNode(Kind::EQUAL, {{ {args} }})"
-        args = ", ".join(node_to_cpp(c, var_ctx) for c in expr.children)
-        return f"nm->mkNode(Kind::{expr.op.kind}, {{ {args} }})"
-
-    raise NotImplementedError(
-        f"node_to_cpp: unhandled {type(expr).__name__}: {expr!r}")
+def check_vars_bound(expr, var_ctx: dict) -> None:
+    """gen_mk_node prints an unknown variable as is, which fails in the C++."""
+    if isinstance(expr, Var) and expr not in var_ctx:
+        raise NotImplementedError(
+            f"variable '{expr.name}' is not bound by the left-hand side")
+    for child in expr.children:
+        check_vars_bound(child, var_ctx)
 
 
 ###############################################################################
@@ -166,11 +171,23 @@ def cond_to_cpp(cond, var_ctx: dict) -> str:
         if cond.op in (Op.EQ, Op.GEQ, Op.LEQ, Op.GT, Op.LT):
             op_map = {Op.EQ: "==", Op.GEQ: ">=", Op.LEQ: "<=",
                       Op.GT: ">",  Op.LT:  "<"}
+            # On terms, == is structural equality: it implies the condition,
+            # so it is a sound (if incomplete) test. <, <=, >, >= on Nodes
+            # would compare node ids, not values.
+            if cond.op != Op.EQ and _is_node_expr(cond, var_ctx):
+                raise NotImplementedError(
+                    f"inequality on terms needs the evaluated conditions of "
+                    f"the piand/exp profiles: {cond!r}")
             lhs = arith_to_cpp(cond.children[0], var_ctx)
             rhs = arith_to_cpp(cond.children[1], var_ctx)
             return f"{lhs} {op_map[cond.op]} {rhs}"
 
         if cond.op == Op.NOT:
+            # !(a == b) on terms holds for distinct terms of equal value.
+            if _is_node_expr(cond, var_ctx):
+                raise NotImplementedError(
+                    f"negation on terms needs the evaluated conditions of "
+                    f"the piand/exp profiles: {cond!r}")
             return f"!({cond_to_cpp(cond.children[0], var_ctx)})"
 
     raise NotImplementedError(
@@ -198,56 +215,20 @@ def arith_to_cpp(expr, var_ctx: dict) -> str:
     entire expression is lifted to Node arithmetic so that the comparison
     operator in cond_to_cpp can emit a Node == Node check.
     """
+    check_vars_bound(expr, var_ctx)
+    if _is_node_expr(expr, var_ctx):
+        return gen_mk_node(var_ctx, expr)
+
     if isinstance(expr, CInt):
         return str(expr.val)
 
-    if isinstance(expr, Var):
-        if expr in var_ctx:
-            return var_ctx[expr]   # TNode accessor, e.g. node[1][1]
-        return expr.name
-
     if isinstance(expr, App):
-        if expr.op == Op.ADD:
-            # If any child involves a TNode, build a Node-level addition
-            if _is_node_expr(expr, var_ctx):
-                args = []
-                for c in expr.children:
-                    a = arith_to_cpp(c, var_ctx)
-                    if isinstance(c, CInt):
-                        a = f"nm->mkConstInt(Rational({c.val}))"
-                    args.append(a)
-                inner = ", ".join(args)
-                return f"nm->mkNode(Kind::ADD, {{ {inner} }})"
-            return "(" + " + ".join(arith_to_cpp(c, var_ctx) for c in expr.children) + ")"
-        if expr.op == Op.SUB:
-            if len(expr.children) == 1:
-                inner = arith_to_cpp(expr.children[0], var_ctx)
-                if _is_node_expr(expr.children[0], var_ctx):
-                    return f"nm->mkNode(Kind::NEG, {{ {inner} }})"
-                return f"(-{inner})"
-            lhs = arith_to_cpp(expr.children[0], var_ctx)
-            rhs = arith_to_cpp(expr.children[1], var_ctx)
-            if _is_node_expr(expr, var_ctx):
-                if isinstance(expr.children[0], CInt):
-                    lhs = f"nm->mkConstInt(Rational({expr.children[0].val}))"
-                if isinstance(expr.children[1], CInt):
-                    rhs = f"nm->mkConstInt(Rational({expr.children[1].val}))"
-                return f"nm->mkNode(Kind::SUB, {{ {lhs}, {rhs} }})"
-            return f"({lhs} - {rhs})"
-        if expr.op == Op.MULT:
-            if _is_node_expr(expr, var_ctx):
-                args = []
-                for c in expr.children:
-                    a = arith_to_cpp(c, var_ctx)
-                    if isinstance(c, CInt):
-                        a = f"nm->mkConstInt(Rational({c.val}))"
-                    args.append(a)
-                inner = ", ".join(args)
-                return f"nm->mkNode(Kind::MULT, {{ {inner} }})"
-            return "(" + " * ".join(arith_to_cpp(c, var_ctx) for c in expr.children) + ")"
-        if expr.op == Op.PBVSIZE:
-            arg = node_to_cpp(expr.children[0], var_ctx)
-            return f"nm->mkNode(Kind::PBV_SIZE, {{ {arg} }})"
+        args = [arith_to_cpp(c, var_ctx) for c in expr.children]
+        if expr.op == Op.NEG:
+            return f"(-{args[0]})"
+        if expr.op in (Op.ADD, Op.SUB, Op.MULT):
+            separator = {Op.ADD: " + ", Op.SUB: " - ", Op.MULT: " * "}[expr.op]
+            return "(" + separator.join(args) + ")"
 
     raise NotImplementedError(
         f"arith_to_cpp: unhandled {type(expr).__name__}: {expr!r}")
@@ -272,6 +253,9 @@ def arith_to_cpp(expr, var_ctx: dict) -> str:
 OPTION_GATED_PREFIXES = {
     "pbv-merge-": "d_rwMerge",
     "pbv-c26-": "d_rwCav26",
+    "pbv-andn-": "d_rwAndNot",
+    "pbv-orn-": "(d_rwOrNot && !d_rwOrNotSimple)",
+    "pbv-orns-": "(d_rwOrNot && d_rwOrNotSimple)",
 }
 
 # Individual rules that are opt-in but whose names do not carry a family
@@ -290,20 +274,54 @@ OPTION_GATED_RULES = {
 }
 
 
+# Rules (or families, by prefix) that --pbv-rewrites-min also enables, on top
+# of their own gate: the rewriter's share of the RW_B table, without the rest
+# of the pbv-c26-* family.
+MIN_RULES = ("pbv-c26-xor-allones", "pbv-c26-not-plus-one", "pbv-andn-")
+
+
 def gated_guard(name: str) -> str | None:
     """The option member gating this rule, or None if it is unconditional."""
-    if name in OPTION_GATED_RULES:
-        return OPTION_GATED_RULES[name]
-    for prefix, member in OPTION_GATED_PREFIXES.items():
-        if name.startswith(prefix):
-            return member
-    return None
+    member = OPTION_GATED_RULES.get(name)
+    if member is None:
+        for prefix, m in OPTION_GATED_PREFIXES.items():
+            if name.startswith(prefix):
+                member = m
+                break
+    if member is not None and name.startswith(MIN_RULES):
+        return f"({member} || d_rwMin)"
+    return member
 
 
-def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
+def ret_rewrite_response(var: str) -> str:
+    """Return statement of the pbv profile: a TheoryRewriter response."""
+    return f"return RewriteResponse(REWRITE_AGAIN_FULL, {var});"
+
+
+def cond_eval_cpp(cond, var_ctx: dict) -> str:
+    """
+    Condition of the piand/exp profiles: build the condition term and require
+    that it EVALUATES to true. A condition on a free term (e.g. t >= 0 with
+    symbolic t) does not evaluate, so the rule does not fire -- the rewriter
+    never assumes an unproved side condition.
+    """
+    if isinstance(cond, CBool):
+        return "" if cond.val else "false"
+    check_vars_bound(cond, var_ctx)
+    return f"rareCondHolds({gen_mk_node(var_ctx, cond)})"
+
+
+def ret_node(var: str) -> str:
+    """Return statement of the piand/exp profiles: the bare rewritten node."""
+    return f"return {var};"
+
+
+def gen_rule_block(rule: Rule, indent: str = "    ", gate_fn=gated_guard,
+                   ret_fn=ret_rewrite_response,
+                   cond_fn=cond_to_cpp) -> list[str]:
     lines: list[str] = []
     lines.append(f"{indent}// Rule: {rule.name}")
-    gate = gated_guard(rule.name)
+    gate = gate_fn(rule.name)
 
     var_ctx: dict = {}
     structural_guards: list[str] = []
@@ -316,7 +334,7 @@ def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
 
     # Semantic condition
     try:
-        sem = cond_to_cpp(rule.cond, var_ctx)
+        sem = cond_fn(rule.cond, var_ctx)
     except NotImplementedError as exc:
         lines.append(f"{indent}// SKIPPED (condition): {exc}")
         return lines
@@ -346,7 +364,7 @@ def gen_rule_block(rule: Rule, indent: str = "    ") -> list[str]:
 
     enum = rule.get_enum().lower()
     lines.append(f"{body}Node rhs_{enum} = {rhs_cpp};")
-    lines.append(f"{body}return RewriteResponse(REWRITE_AGAIN_FULL, rhs_{enum});")
+    lines.append(f"{body}{ret_fn(f'rhs_{enum}')}")
 
     if all_guards:
         lines.append(f"{indent}}}")
@@ -696,7 +714,7 @@ MANUAL_RULES_BODY = """\
 ###############################################################################
 
 def lhs_kind(rule: Rule):
-    return rule.lhs.op.kind if isinstance(rule.lhs, App) else None
+    return gen_kind(rule.lhs.op) if isinstance(rule.lhs, App) else None
 
 
 ###############################################################################
@@ -757,7 +775,11 @@ class TheoryPbvRewriter : public TheoryRewriter {
                     bool rwNnf = false,
                     bool rwBool = false,
                     uint64_t boolCap = 12,
-                    bool rwShiftZext = false)
+                    bool rwShiftZext = false,
+                    bool rwAndNot = false,
+                    bool rwOrNot = false,
+                    bool rwOrNotSimple = false,
+                    bool rwMin = false)
       : TheoryRewriter(nm),
         d_rwMerge(rwMw == options::PbvRwMwMode::BASE
                   || rwMw == options::PbvRwMwMode::BASE_CAV26),
@@ -768,7 +790,11 @@ class TheoryPbvRewriter : public TheoryRewriter {
         d_rwNnf(rwNnf),
         d_rwBool(rwBool),
         d_boolCap(boolCap),
-        d_rwShiftZext(rwShiftZext)
+        d_rwShiftZext(rwShiftZext),
+        d_rwAndNot(rwAndNot),
+        d_rwOrNot(rwOrNot),
+        d_rwOrNotSimple(rwOrNotSimple),
+        d_rwMin(rwMin)
   {
   }
 
@@ -801,6 +827,20 @@ class TheoryPbvRewriter : public TheoryRewriter {
   uint64_t d_boolCap;
   /** --pbv-rw-shift-zext-merge: merge shifts across a zero extension. */
   bool d_rwShiftZext;
+  /** --pbv-rw-and-not: the `pbv-andn-*` rules, x & ~y -> x - (x & y). */
+  bool d_rwAndNot;
+  /**
+   * --pbv-rw-or-not: the `pbv-orn-*` rules, x | ~y -> ~0 - y + (x & y), or
+   * with d_rwOrNotSimple the `pbv-orns-*` rules, x | ~y -> ~y + (x & y).
+   */
+  bool d_rwOrNot;
+  /** --pbv-rw-or-not-simple: which of the two or-not forms is used. */
+  bool d_rwOrNotSimple;
+  /**
+   * --pbv-rewrites-min: the rules of the RW_B table that live here
+   * (xor-ones, not-plus-one, and-not), without the rest of their families.
+   */
+  bool d_rwMin;
 
   /** Gather the distinct non-bitwise leaves of a bitwise term. */
   static bool boolLeaves(TNode n, std::vector<Node>& leaves, uint64_t cap);
@@ -817,32 +857,179 @@ class TheoryPbvRewriter : public TheoryRewriter {
 
 
 ###############################################################################
+# Rule-only rewriters (piand, exp profiles)
+#
+# A free function per file: the kinds belong to the arithmetic theory, whose
+# rewriter calls the function and keeps control of the response.
+###############################################################################
+
+FUNC_HEADER_TEMPLATE = """\
+/******************************************************************************
+ * This file is part of the cvc5 project.
+ *
+ * Copyright (c) 2009-2025 by the authors listed in the file AUTHORS
+ * in the top-level source directory and their institutional affiliations.
+ * All rights reserved.  See the file COPYING in the top-level source
+ * directory for licensing information.
+ * ****************************************************************************
+ *
+ * RARE rewrites for {what}.
+ *
+ * AUTO-GENERATED by src/theory/pbv/generate_rewriter.py --profile {profile}.
+ * The rules are in src/theory/pbv/{rewrites}; the implementation is generated
+ * into {base}.cpp. Do not edit either file by hand.
+ */
+
+#include "cvc5_private.h"
+
+#ifndef CVC5__THEORY__PBV__{guard}_H
+#define CVC5__THEORY__PBV__{guard}_H
+
+#include "expr/node.h"
+
+namespace cvc5::internal {{
+
+class NodeManager;
+
+namespace theory {{
+namespace pbv {{
+
+/**
+ * Apply the first rule of src/theory/pbv/{rewrites} whose left-hand side
+ * matches node, and return its right-hand side; return the null node if no
+ * rule matches. The children of node are expected to be rewritten already.
+ */
+Node {func}(NodeManager* nm, TNode node);
+
+}}  // namespace pbv
+}}  // namespace theory
+}}  // namespace cvc5::internal
+
+#endif  // CVC5__THEORY__PBV__{guard}_H
+"""
+
+FUNC_IMPL_TEMPLATE = """\
+/******************************************************************************
+ * AUTO-GENERATED by src/theory/pbv/generate_rewriter.py --profile {profile}
+ *
+ * DO NOT EDIT BY HAND.  The build regenerates this file from the rules.
+ *
+ * Source rules: src/theory/pbv/{rewrites}  (RARE DSL)
+ * Parser:       src/rewriter/rw_parser.py
+ ******************************************************************************/
+
+#include "theory/pbv/{base}.h"
+
+#include "expr/node.h"
+#include "expr/node_manager.h"
+#include "theory/evaluator.h"
+#include "util/rational.h"
+
+namespace cvc5::internal {{
+namespace theory {{
+namespace pbv {{
+
+namespace {{
+
+/**
+ * True iff the side condition c evaluates to true. A condition on free terms
+ * does not evaluate, and then the rule does not fire.
+ */
+[[maybe_unused]] bool rareCondHolds(Node c)
+{{
+  Evaluator eval(nullptr);
+  Node v = eval.eval(c, {{}}, {{}});
+  return !v.isNull() && v.isConst() && v.getType().isBoolean()
+         && v.getConst<bool>();
+}}
+
+}}  // namespace
+
+Node {func}(NodeManager* nm, TNode node)
+{{
+{body}
+  return Node::null();
+}}
+
+}}  // namespace pbv
+}}  // namespace theory
+}}  // namespace cvc5::internal
+"""
+
+
+class Profile:
+    def __init__(self, name, rewrites, base, kinds=None, func=None, what=None):
+        self.name = name
+        self.rewrites = rewrites    # file name under src/theory/pbv
+        self.base = base            # output file stem
+        self.kinds = kinds          # allowed LHS kinds; None = any
+        self.func = func            # generated function (None: TheoryPbvRewriter)
+        self.what = what
+
+
+PROFILES = {
+    "pbv": Profile("pbv", "rewrites", "theory_pbv_rewriter"),
+    "piand": Profile("piand", "rewrites-piand", "theory_piand_rewriter",
+                     kinds={"PIAND"}, func="rewritePiandRare",
+                     what="the parametric integer AND (piand)"),
+    "exp": Profile("exp", "rewrites-exp", "theory_exp_rewriter",
+                   kinds={"EXP", "INTS_DIVISION", "INTS_MODULUS"},
+                   func="rewriteExpRare",
+                   what="integer exponentiation (exp, **) and the div/mod "
+                        "identities on its powers"),
+}
+
+
+def func_header(p: Profile) -> str:
+    return FUNC_HEADER_TEMPLATE.format(
+        what=p.what, profile=p.name, rewrites=p.rewrites, base=p.base,
+        guard=p.base.upper(), func=p.func)
+
+
+###############################################################################
 # Main
 ###############################################################################
 
-def generate(output_dir: Path = None):
-    # Resolve output directory: CLI-supplied or the script's own directory.
-    out = Path(output_dir) if output_dir is not None else SCRIPT_DIR
+def generate(output_dir: Path, only: str = None, profile: str = "pbv",
+             rewrites: Path = None):
+    p = PROFILES[profile]
+    rewrites_file = Path(rewrites) if rewrites else SCRIPT_DIR / p.rewrites
+    out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    header_file = out / "theory_pbv_rewriter.h"
-    impl_file   = out / "theory_pbv_rewriter.cpp"
+    header_file = out / f"{p.base}.h"
+    impl_file   = out / f"{p.base}.cpp"
+
+    if only != "impl":
+        with open(header_file, "w") as fh:
+            fh.write(HEADER_CONTENT if p.func is None else func_header(p))
+        print(f"Generated header : {header_file}")
+    if only == "header":
+        return
 
     parser = Parser()
-    with open(REWRITES_FILE) as fh:
+    with open(rewrites_file) as fh:
         rules = parser.parse_rules(fh.read())
 
+    # A rule that cannot be translated must stop the build: otherwise it stays
+    # in the proof database but silently never fires in the solver.
+    errors: list[str] = []
+    seen_names: set[str] = set()
     by_kind: dict[str, list] = defaultdict(list)
-    skipped = []
     for rule in rules:
+        validate_rule(rule)
+        if rule.name in seen_names:
+            errors.append(f"{rule.name}: duplicate rule name")
+        seen_names.add(rule.name)
         k = lhs_kind(rule)
-        if k:
-            by_kind[k].append(rule)
+        if not k:
+            errors.append(f"{rule.name}: left-hand side has no top-level "
+                          f"operator to match on")
+        elif p.kinds is not None and k not in p.kinds:
+            errors.append(f"{rule.name}: left-hand side is {k}, but the "
+                          f"{p.name} rewriter is only called on "
+                          f"{', '.join(sorted(p.kinds))}, so it would never fire")
         else:
-            skipped.append(rule)
-
-    if skipped:
-        print(f"WARNING: {len(skipped)} rules skipped (no top-level kind): "
-              f"{[r.name for r in skipped]}", file=sys.stderr)
+            by_kind[k].append(rule)
 
     body_lines: list[str] = []
     for kind in sorted(by_kind):
@@ -850,20 +1037,40 @@ def generate(output_dir: Path = None):
         body_lines.append(f"  if (node.getKind() == Kind::{kind})")
         body_lines.append(f"  {{")
         for rule in by_kind[kind]:
-            for line in gen_rule_block(rule, "    "):
+            if p.func is None:
+                block = gen_rule_block(rule, "    ")
+            else:
+                block = gen_rule_block(rule, "    ", gate_fn=lambda _: None,
+                                       ret_fn=ret_node, cond_fn=cond_eval_cpp)
+            for line in block:
                 body_lines.append(line)
+                if "// SKIPPED " in line:
+                    errors.append(f"{rule.name}: {line.strip()[3:]}")
             body_lines.append("")
         body_lines.append(f"  }}  // Kind::{kind}")
         body_lines.append("")
 
+    if errors:
+        for error in errors:
+            print(f"ERROR: {rewrites_file}: {error}", file=sys.stderr)
+        sys.exit(1)
+
     body = "\n".join(body_lines)
+
+    if p.func is not None:
+        with open(impl_file, "w") as fh:
+            fh.write(FUNC_IMPL_TEMPLATE.format(
+                profile=p.name, rewrites=p.rewrites, base=p.base, func=p.func,
+                body=body.rstrip("\n")))
+        print(f"Generated impl   : {impl_file}")
+        print(f"Rules parsed: {len(rules)}")
+        return
 
     impl = (
         "/******************************************************************************\n"
         " * AUTO-GENERATED by src/theory/pbv/generate_rewriter.py\n"
         " *\n"
-        " * DO NOT EDIT BY HAND.  Re-generate by running:\n"
-        " *   python3 src/theory/pbv/generate_rewriter.py\n"
+        " * DO NOT EDIT BY HAND.  The build regenerates this file from the rules.\n"
         " *\n"
         " * Implements RW_B (Appendix A) from:\n"
         " *   \"Bit-Precise Reasoning with Parametric Bit-Vectors\"\n"
@@ -905,32 +1112,44 @@ def generate(output_dir: Path = None):
         "}  // namespace cvc5::internal\n"
     )
 
-    # Write header (stable class declaration)
-    with open(header_file, "w") as fh:
-        fh.write(HEADER_CONTENT)
-
     # Write implementation (auto-generated rule dispatch)
     with open(impl_file, "w") as fh:
         fh.write(impl)
 
-    print(f"Generated header : {header_file}")
     print(f"Generated impl   : {impl_file}")
     print(f"Rules parsed: {len(rules)}")
     print(f"Kinds covered ({len(by_kind)}): {sorted(by_kind)}")
-    if skipped:
-        print(f"Skipped: {[r.name for r in skipped]}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
-        description="Generate TheoryPbvRewriter .h/.cpp from the RARE rewrites file."
+        description="Generate a PBV-theory rewriter .h/.cpp from a RARE rewrites file."
+    )
+    ap.add_argument(
+        "--profile",
+        choices=sorted(PROFILES),
+        default="pbv",
+        help="Which rewriter to generate (default: pbv). piand and exp read "
+             "rewrites-piand / rewrites-exp and emit a free function that the "
+             "arithmetic rewriter calls.",
+    )
+    ap.add_argument(
+        "--rewrites",
+        metavar="FILE",
+        help="RARE file to read instead of the profile's default.",
     )
     ap.add_argument(
         "--output-dir",
         metavar="DIR",
-        default=None,
-        help="Directory to write the generated files into "
-             "(default: same directory as this script).",
+        required=True,
+        help="Directory to write the generated files into.",
+    )
+    ap.add_argument(
+        "--only",
+        choices=["header", "impl"],
+        help="Write just one file. The build uses this because the header does "
+             "not depend on the rules: rewriting it on every rule edit would "
+             "recompile everything that includes it.",
     )
     args = ap.parse_args()
-    generate(output_dir=args.output_dir)
+    generate(args.output_dir, args.only, args.profile, args.rewrites)

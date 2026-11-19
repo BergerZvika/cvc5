@@ -1,0 +1,23 @@
+; COMMAND-LINE: --learned-rewrite-rules=shift-add-distrib
+; EXPECT: unsat
+; Under s >= p + 2^u and s >= q + 1 rule F stays enabled.
+(set-logic PBV)
+(declare-const p Int)
+(declare-const u Int)
+(declare-const q Int)
+(declare-const s Int)
+(declare-fun x () PBitVec)
+(declare-fun z () PBitVec)
+(declare-fun y () PBitVec)
+(assert (= (pbvsize x) p))
+(assert (= (pbvsize z) u))
+(assert (= (pbvsize y) q))
+(assert (>= p 1))
+(assert (>= u 1))
+(assert (>= q 1))
+(assert (>= s (+ p (int.pow2 u))))
+(assert (>= s (+ q 1)))
+(assert (not (= (pbvlshr (pbvadd (pbvshl (pzero_extend (- s p) x) (pzero_extend (- s u) z)) (pzero_extend (- s q) y))
+                         (pzero_extend (- s u) z))
+                (pbvadd (pzero_extend (- s p) x) (pbvlshr (pzero_extend (- s q) y) (pzero_extend (- s u) z))))))
+(check-sat)

@@ -55,8 +55,8 @@ list(APPEND REWRITE_OUTPUT_FILES
   ${CMAKE_BINARY_DIR}/include/cvc5/cvc5_proof_rule.h
 )
 
-# If the generated header differs from the source header, it should be copied to
-# the source directory manually for compilation to succeed.
+# mkrewrites.py adds the names of new rules to the source header, which is the
+# one that gets compiled. It never removes a name, so the two headers may differ.
 list(APPEND LIBCVC5_GEN_SRCS
   ${CMAKE_BINARY_DIR}/src/api/cpp/cvc5_proof_rule.cpp
 )
@@ -76,6 +76,10 @@ add_custom_command(
       --rewrites_files_expert ${REWRITES_FILES_EXPERT}
     DEPENDS
       ${mkrewrites_script}
+      ${CMAKE_CURRENT_LIST_DIR}/node.py
+      ${CMAKE_CURRENT_LIST_DIR}/rule.py
+      ${CMAKE_CURRENT_LIST_DIR}/rw_parser.py
+      ${CMAKE_CURRENT_LIST_DIR}/util.py
       ${REWRITES_FILES}
       ${REWRITES_FILES_EXPERT}
       ${CMAKE_CURRENT_LIST_DIR}/theory_rewrites_template.cpp
@@ -90,3 +94,6 @@ add_custom_target(gen-rewrites
   DEPENDS
     ${REWRITE_OUTPUT_FILES}
 )
+# The PBV generator rejects rules that it cannot translate. Run it first, so that
+# the name of a rejected rule never reaches the API header edited by mkrewrites.
+add_dependencies(gen-rewrites gen-theory)

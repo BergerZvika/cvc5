@@ -159,6 +159,11 @@ class Op(Enum):
     LEQ = ('<=', 'LEQ')
     GEQ = ('>=', 'GEQ')
     POW2 = ('int.pow2', 'POW2')
+    # Integer exponentiation and parametric integer AND, as written in the
+    # cvc5 SMT-LIB front end ('**' and 'piand'); used by the PBV theory's
+    # rewrites-exp and rewrites-piand files.
+    EXP = ('**', 'EXP')
+    PIAND = ('piand', 'PIAND')
     TO_INT = ('to_int', 'TO_INTEGER')
     TO_REAL = ('to_real', 'TO_REAL')
     IS_INT = ('is_int', 'IS_INTEGER')
@@ -260,6 +265,17 @@ class Op(Enum):
     SET_IS_EMPTY = ('set.is_empty', 'SET_IS_EMPTY')
     SET_IS_SINGLETON = ('set.is_singleton', 'SET_IS_SINGLETON')
     SET_EMPTY_OF_TYPE = ('@set.empty_of_type', 'SET_EMPTY_OF_TYPE')
+
+
+# Extra RARE spellings of an operator. An Op's value is its kind, so a second
+# Op entry with the same kind would only become an alias of the first and lose
+# its symbol; extra spellings are therefore listed here and merged into the
+# parser's symbol table (rw_parser.symbol_to_op).
+#   exp : integer exponentiation, the same EXP kind as '**' (SMT-LIB's
+#         transcendental `exp` has no RARE symbol, so the name is free).
+SYMBOL_ALIASES = {
+    'exp': Op.EXP,
+}
 
 
 class BaseSort(Enum):

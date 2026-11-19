@@ -1,0 +1,73 @@
+; Rewrite Rules for the parametric integer AND, (piand k x y)
+;
+; Compiled at build time by src/theory/pbv/generate_rewriter.py --profile piand
+; into theory_piand_rewriter.cpp, and applied by ArithRewriter::postRewritePIAnd
+; under --piand-rare-rewrites (off by default), BEFORE the hand-written PIAND
+; rules there. Like every RARE file, the rules are also part of the proof
+; rewrite database.
+;
+; Semantics: (piand k x y) = 0 if k <= 0, and otherwise the bitwise AND of the
+; low k bits of x and y, i.e. ubv_to_int(int_to_bv(k, x) & int_to_bv(k, y)).
+; x and y may be negative; int_to_bv takes them modulo 2^k.
+;
+; Every rule must hold for ALL integers k, x, y -- a rule here has no access to
+; the width constraints of a PBV problem, so k <= 0 and negative arguments are
+; real cases, not corner cases.
+;
+; Only rules whose left-hand side is a piand term are accepted: the arith
+; rewriter calls this rewriter for PIAND nodes only, so any other rule would
+; never fire, and the generator stops the build instead.
+
+; ---------------------------------------------------------------------------
+; Annihilation
+; ---------------------------------------------------------------------------
+
+; x & 0 = 0 at every width, and piand is 0 at k <= 0 anyway.
+(define-rule piand-zero-left
+  ((k Int) (y Int))
+  (piand k 0 y)
+  0)
+
+(define-rule piand-zero-right
+  ((k Int) (x Int))
+  (piand k x 0)
+  0)
+
+; ---------------------------------------------------------------------------
+; Idempotence
+; ---------------------------------------------------------------------------
+
+; x & x = x mod 2^k for k > 0. The guard is required: at k < 0, (** 2 k) is 0
+; and (mod_total x 0) is x, while piand is 0.
+(define-rule piand-idem
+  ((k Int) (x Int))
+  (piand k x x)
+  (ite (> k 0) (mod_total x (** 2 k)) 0))
+
+; ---------------------------------------------------------------------------
+; Absorption: x & (x & y) = x & y
+; ---------------------------------------------------------------------------
+; Valid at every k: for k <= 0 both sides are 0; for k > 0 the inner term is
+; already reduced below 2^k, so masking it again with x changes nothing.
+; The arith rewriter orders the two arguments of a piand by node id, so the
+; repeated operand can sit on either side of either term: all four placements.
+
+(define-rule piand-absorb-ll
+  ((k Int) (x Int) (y Int))
+  (piand k x (piand k x y))
+  (piand k x y))
+
+(define-rule piand-absorb-lr
+  ((k Int) (x Int) (y Int))
+  (piand k x (piand k y x))
+  (piand k y x))
+
+(define-rule piand-absorb-rl
+  ((k Int) (x Int) (y Int))
+  (piand k (piand k x y) x)
+  (piand k x y))
+
+(define-rule piand-absorb-rr
+  ((k Int) (x Int) (y Int))
+  (piand k (piand k y x) x)
+  (piand k y x))

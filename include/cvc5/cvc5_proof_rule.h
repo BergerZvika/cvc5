@@ -4436,6 +4436,18 @@ enum ENUM(ProofRewriteRule)
   EVALUE(PBV_C26_XOR_ALLONES),
   /** Auto-generated from RARE rule pbv-c26-not-plus-one */
   EVALUE(PBV_C26_NOT_PLUS_ONE),
+  /** Auto-generated from RARE rule pbv-andn-right */
+  EVALUE(PBV_ANDN_RIGHT),
+  /** Auto-generated from RARE rule pbv-andn-left */
+  EVALUE(PBV_ANDN_LEFT),
+  /** Auto-generated from RARE rule pbv-orn-right */
+  EVALUE(PBV_ORN_RIGHT),
+  /** Auto-generated from RARE rule pbv-orn-left */
+  EVALUE(PBV_ORN_LEFT),
+  /** Auto-generated from RARE rule pbv-orns-right */
+  EVALUE(PBV_ORNS_RIGHT),
+  /** Auto-generated from RARE rule pbv-orns-left */
+  EVALUE(PBV_ORNS_LEFT),
   /** Auto-generated from RARE rule pbv-zero-extend-eliminate */
   EVALUE(PBV_ZERO_EXTEND_ELIMINATE),
   /** Auto-generated from RARE rule pbv-sign-extend-eliminate */
@@ -4926,6 +4938,48 @@ enum ENUM(ProofRewriteRule)
   EVALUE(SETS_CARD_MINUS),
   /** Auto-generated from RARE rule sets-card-emp */
   EVALUE(SETS_CARD_EMP),
+  /** Auto-generated from RARE rule pbv-shl-by-const-k */
+  EVALUE(PBV_SHL_BY_CONST_K),
+  /** Auto-generated from RARE rule piand-zero-left */
+  EVALUE(PIAND_ZERO_LEFT),
+  /** Auto-generated from RARE rule piand-zero-right */
+  EVALUE(PIAND_ZERO_RIGHT),
+  /** Auto-generated from RARE rule piand-idem */
+  EVALUE(PIAND_IDEM),
+  /** Auto-generated from RARE rule piand-absorb-ll */
+  EVALUE(PIAND_ABSORB_LL),
+  /** Auto-generated from RARE rule piand-absorb-lr */
+  EVALUE(PIAND_ABSORB_LR),
+  /** Auto-generated from RARE rule piand-absorb-rl */
+  EVALUE(PIAND_ABSORB_RL),
+  /** Auto-generated from RARE rule piand-absorb-rr */
+  EVALUE(PIAND_ABSORB_RR),
+  /** Auto-generated from RARE rule exp-const-zero */
+  EVALUE(EXP_CONST_ZERO),
+  /** Auto-generated from RARE rule exp-const-one */
+  EVALUE(EXP_CONST_ONE),
+  /** Auto-generated from RARE rule exp-const-base-one */
+  EVALUE(EXP_CONST_BASE_ONE),
+  /** Auto-generated from RARE rule exp-const-base-zero */
+  EVALUE(EXP_CONST_BASE_ZERO),
+  /** Auto-generated from RARE rule exp-const-neg */
+  EVALUE(EXP_CONST_NEG),
+  /** Auto-generated from RARE rule exp-normalize */
+  EVALUE(EXP_NORMALIZE),
+  /** Auto-generated from RARE rule exp-unroll */
+  EVALUE(EXP_UNROLL),
+  /** Auto-generated from RARE rule exp-reduce-mul */
+  EVALUE(EXP_REDUCE_MUL),
+  /** Auto-generated from RARE rule exp-reduce-mul-neg-one */
+  EVALUE(EXP_REDUCE_MUL_NEG_ONE),
+  /** Auto-generated from RARE rule exp-reduce-div */
+  EVALUE(EXP_REDUCE_DIV),
+  /** Auto-generated from RARE rule exp-div-fuse */
+  EVALUE(EXP_DIV_FUSE),
+  /** Auto-generated from RARE rule exp-shl-past */
+  EVALUE(EXP_SHL_PAST),
+  /** Auto-generated from RARE rule exp-shl-past-single */
+  EVALUE(EXP_SHL_PAST_SINGLE),
 // ${rules}$
 #ifdef CVC5_API_USE_C_ENUMS
   // must be last entry

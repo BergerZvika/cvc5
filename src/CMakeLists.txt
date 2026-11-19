@@ -730,7 +730,6 @@ libcvc5_add_sources(
   theory/pbv/type_enumerator.h
   theory/pbv/int_blaster.cpp
   theory/pbv/int_blaster.h
-  theory/pbv/theory_pbv_rewriter.h
   theory/care_graph.h
   theory/care_pair_argument_callback.cpp
   theory/care_pair_argument_callback.cpp
@@ -1505,6 +1504,8 @@ set(REWRITES_FILES
   ${PROJECT_SOURCE_DIR}/src/theory/bv/rewrites-elimination
   ${PROJECT_SOURCE_DIR}/src/theory/bv/rewrites-simplification
   ${PROJECT_SOURCE_DIR}/src/theory/pbv/rewrites
+  ${PROJECT_SOURCE_DIR}/src/theory/pbv/rewrites-exp
+  ${PROJECT_SOURCE_DIR}/src/theory/pbv/rewrites-piand
   ${PROJECT_SOURCE_DIR}/src/theory/sets/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/strings/rewrites
   ${PROJECT_SOURCE_DIR}/src/theory/strings/rewrites-regexp-membership

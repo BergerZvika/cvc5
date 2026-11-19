@@ -245,6 +245,11 @@ bool ExpFeatureSet::has(const std::string& name) const
              && name != "exp-fuse-model"
              && name != "pbv" && name != "neg-recip"
              && name != "fuse-model"
+             // 'divides-pair' is new; explicit-only so no recorded 'all'
+             // baseline changes.
+             && name != "divides-pair"
+             // 'divides-base' likewise.
+             && name != "divides-base"
              // 'bounding' is explicit-only too: it costs QF_EIA instances
              // (PURRS/purrs31 goes from 0.3s to a timeout). Name it, or give
              // --arith-exp-bounding, to have it alongside 'all'.

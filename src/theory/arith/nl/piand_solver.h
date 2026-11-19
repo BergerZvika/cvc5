@@ -14,6 +14,8 @@
 #define CVC5__THEORY__ARITH__NL__PIAND_SOLVER_H
 
 #include <map>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "context/cdhashset.h"
@@ -92,6 +94,13 @@ class PIAndSolver : protected EnvObj
   Node d_two;
 
   IAndUtils d_iandUtils;
+  /**
+   * The lemma schemas selected by --piand-lemmas, with the aggregates `all`
+   * and `complement-both` expanded.
+   */
+  std::set<std::string> d_lemmas;
+  /** Is the --piand-lemmas schema `name` selected? */
+  bool hasLemma(const char* name) const { return d_lemmas.count(name) > 0; }
   /** PIAND terms that have been given initial refinement lemmas */
 
   NodeSet d_initRefine;
@@ -101,6 +110,64 @@ class PIAndSolver : protected EnvObj
    * applied to its own output.
    */
   NodeSet d_complementIntroduced;
+  /**
+   * Pairs (as SEXPR nodes) already given the complement split by
+   * --piand-lemmas=complement-existing.
+   */
+  NodeSet d_complementPairs;
+  /**
+   * The complement split restricted to pairs of PIAND terms that both already
+   * occur in d_piands (--piand-lemmas=complement-existing); never creates a
+   * new PIAND term.
+   */
+  void checkComplementExisting();
+  /**
+   * Relations between PIAND terms that all already occur in d_piands
+   * (--piand-lemmas=subset-trans, subset-mono, pow2-idiom); never creates a
+   * new PIAND term.
+   */
+  void checkSubsetExisting();
+  /** Whether lem evaluates to false in the current abstract model. */
+  bool modelFalsifies(const Node& lem);
+  /**
+   * a with purification skolems and reductions mod 2^k peeled off; congruent
+   * to a mod 2^k, so it is what a PIAND at width k sees of a.
+   */
+  Node maskedForm(TNode a, TNode k);
+  /**
+   * The power term 2^j (EXP or POW2) if m is congruent to 2^j-1 mod 2^k
+   * (--piand-lemmas=mask-sym), else null.
+   */
+  Node lowMaskPow(TNode m, TNode k);
+  /** The result of alignedPows. */
+  struct Alignment
+  {
+    /** a is 0 or a multiple of 2^k, so it masks to 0 at width k */
+    bool d_zero = false;
+    /** existing power terms 2^j (EXP or POW2) such that a is a multiple of
+     * 2^j */
+    std::set<Node> d_pows;
+    bool empty() const { return !d_zero && d_pows.empty(); }
+  };
+  /**
+   * Syntactic alignment of a, an argument of a PIAND at width k
+   * (--piand-lemmas=align, align-id). Descends only through terms whose value
+   * is eventually reduced mod 2^k: sums, products, ITE, mod 2^k, PIAND at the
+   * same width and purification skolems. Under that reduction a summand that
+   * is a multiple of 2^k counts as 0 for every 2^j: for j <= k it is a
+   * multiple of 2^j, and for j > k a multiple of 2^j is itself 0 mod 2^k.
+   */
+  Alignment alignedPows(TNode a, TNode k, std::map<Node, Alignment>& memo);
+  /** Whether c is (= 2^k 0), the guard of a purified mod 2^k. */
+  bool isPow2kIsZero(TNode c, TNode k);
+  /** The exponent of a power term 2^j (EXP or POW2). */
+  static Node powExponent(TNode p);
+  /**
+   * Whether a is syntactically 2^k-1 (--piand-ones-rewrite): it rewrites to
+   * 2^k-1 (with 2^k as EXP or POW2), or it is a mod by 2^k of -1 or of such a
+   * term.
+   */
+  bool isOnes(TNode a, TNode k);
   /** all PIAND terms, for each bit-width */
 
   std::map<Node, std::vector<Node>> d_piands;

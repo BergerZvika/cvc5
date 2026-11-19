@@ -147,16 +147,19 @@
 ; ---------------------------------------------------------------------------
 
 ; bv-shl-by-const-0: (pbvshl x (int_to_pbv k 0)) => x
-(define-rule pbv-shl-by-const-0
-  ((x ?) (k Int))
-  (pbvshl x (int_to_pbv k 0))
-  x)
+;(define-rule pbv-shl-by-const-0
+;  ((x ?) (k Int))
+;  (pbvshl x (int_to_pbv k 0))
+;  x)
 
-; bv-shl-by-const-2: (pbvshl x (int_to_pbv k k)) => (int_to_pbv k 0)
-;   Fires when the shift amount equals the bit-width k (i.e., shifts out all bits).
-;   k is bound twice in the LHS: as the width argument of int_to_pbv and as its
-;   value argument.  The duplicate-Var guard ensures k_width == k_value.
-(define-rule pbv-shl-by-const-2
+; bv-shl-zero: (pbvshl (int_to_pbv k 0) x) => (int_to_pbv k 0)
+(define-rule pbv-shl-zero
+ ((x ?) (k Int))
+  (pbvshl (int_to_pbv k 0) x)
+  (int_to_pbv k 0))
+
+; bv-shl-by-const-k: (pbvshl x (int_to_pbv k k)) => (int_to_pbv k 0)
+(define-rule pbv-shl-by-const-k
   ((x ?) (k Int))
   (pbvshl x (int_to_pbv k k))
   (int_to_pbv k 0))
@@ -179,12 +182,6 @@
   ((x ?) (k Int))
   (pbvashr x (int_to_pbv k 0))
   x)
-
-; bv-shl-zero: (pbvshl (int_to_pbv k 0) x) => (int_to_pbv k 0)
-(define-rule pbv-shl-zero
-  ((x ?) (k Int))
-  (pbvshl (int_to_pbv k 0) x)
-  (int_to_pbv k 0))
 
 ; bv-lshr-zero: (pbvlshr (int_to_pbv k 0) x) => (int_to_pbv k 0)
 (define-rule pbv-lshr-zero
@@ -539,3 +536,60 @@
   ((x ?) (k Int))
   (pbvadd (pbvnot x) (int_to_pbv k 1))
   (pbvneg x))
+
+; ---------------------------------------------------------------------------
+; And-not to subtraction  (--pbv-rw-and-not, off by default)
+;
+;   x & ~y  =  x - (x & y)
+;
+; x & y has set bits only where x does, so the subtraction never borrows and
+; clears exactly the bits of x that y shares -- which leaves x & ~y.  It
+; removes the pbvnot: after int-blasting, piand(k, x, 2^k-1-y) becomes
+; x - piand(k, x, y), so the complement term never reaches the solver (this is
+; the complement split of --piand-lemmas=complement, applied as a rewrite).
+; Terminating: every application removes one pbvnot.
+; ---------------------------------------------------------------------------
+
+(define-rule pbv-andn-right
+  ((x ?) (y ?))
+  (pbvand x (pbvnot y))
+  (pbvsub x (pbvand x y)))
+
+(define-rule pbv-andn-left
+  ((x ?) (y ?))
+  (pbvand (pbvnot x) y)
+  (pbvsub y (pbvand x y)))
+
+; ---------------------------------------------------------------------------
+; Or-not to arithmetic  (--pbv-rw-or-not, off by default)
+;
+;   pbv-orn-*  (default form)            x | ~y  =  ~0 - y + (x & y)
+;   pbv-orns-* (--pbv-rw-or-not-simple)  x | ~y  =  ~y + (x & y)
+;
+; x | z = x + z - (x & z) with z = ~y, and x & ~y = x - (x & y) (pbv-andn-*),
+; so x | ~y = ~y + (x & y), and ~y = ~0 - y.  Valid modulo 2^k at every width
+; (no carry: ~y and x & y are bitwise disjoint).  The dual of pbv-andn-*: it
+; removes the pbvor, so after int-blasting no piand term for x | ~y is built,
+; only piand(k, x, y).  Terminating: every application removes one pbvor and
+; adds none.  Exactly one of the two forms is active.
+; ---------------------------------------------------------------------------
+
+(define-rule pbv-orn-right
+  ((x ?) (y ?))
+  (pbvor x (pbvnot y))
+  (pbvadd (pbvsub (pbvnot (int_to_pbv (pbvsize x) 0)) y) (pbvand x y)))
+
+(define-rule pbv-orn-left
+  ((x ?) (y ?))
+  (pbvor (pbvnot x) y)
+  (pbvadd (pbvsub (pbvnot (int_to_pbv (pbvsize y) 0)) x) (pbvand x y)))
+
+(define-rule pbv-orns-right
+  ((x ?) (y ?))
+  (pbvor x (pbvnot y))
+  (pbvadd (pbvnot y) (pbvand x y)))
+
+(define-rule pbv-orns-left
+  ((x ?) (y ?))
+  (pbvor (pbvnot x) y)
+  (pbvadd (pbvnot x) (pbvand x y)))

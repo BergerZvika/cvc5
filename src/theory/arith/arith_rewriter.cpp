@@ -35,6 +35,8 @@
 #include "theory/arith/rewriter/ordering.h"
 #include "theory/arith/rewriter/rewrite_atom.h"
 #include "theory/evaluator.h"
+#include "theory/pbv/theory_exp_rewriter.h"
+#include "theory/pbv/theory_piand_rewriter.h"
 #include "theory/rewriter.h"
 #include "theory/strings/arith_entail.h"
 #include "theory/theory.h"
@@ -124,10 +126,16 @@ ArithRewriter::ArithRewriter(NodeManager* nm,
                              bool expertEnabled,
                              const std::string& expRewriteMode,
                              uint64_t expRewriteUnrollBound,
-                             const std::string& expLemmasMode)
+                             const std::string& expLemmasMode,
+                             bool piAndOnes,
+                             bool piandRare,
+                             bool expRare)
     : TheoryRewriter(nm),
       d_opElim(oe),
       d_expertEnabled(expertEnabled),
+      d_piAndOnes(piAndOnes),
+      d_piandRare(piandRare),
+      d_expRare(expRare),
       d_expRewriteMode(expRewriteMode, ExpFeatureAxis::REWRITES),
       d_expLemmasMode(expLemmasMode, ExpFeatureAxis::LEMMAS),
       d_expRewriteUnrollBound(expRewriteUnrollBound)
@@ -529,7 +537,18 @@ RewriteResponse ArithRewriter::postRewriteTerm(TNode t){
       case Kind::INTS_ISPOW2: return postRewriteIntsIsPow2(t);
       case Kind::INTS_LOG2: return postRewriteIntsLog2(t);
       case Kind::INTS_DIVISION:
-      case Kind::INTS_MODULUS: return rewriteIntsDivMod(t, false);
+      case Kind::INTS_MODULUS:
+        // The div/mod rules of src/theory/pbv/rewrites-exp (div-fuse,
+        // shl-past), compiled at build time.
+        if (d_expRare)
+        {
+          Node r = pbv::rewriteExpRare(d_nm, t);
+          if (!r.isNull())
+          {
+            return RewriteResponse(REWRITE_AGAIN_FULL, r);
+          }
+        }
+        return rewriteIntsDivMod(t, false);
       case Kind::INTS_DIVISION_TOTAL:
       case Kind::INTS_MODULUS_TOTAL: return rewriteIntsDivModTotal(t, false);
       case Kind::ABS: return rewriteAbs(t);
@@ -1238,14 +1257,74 @@ RewriteResponse ArithRewriter::postRewriteIAnd(TNode t)
 }
 
 
+bool ArithRewriter::isPIAndOnes(TNode a, TNode k) const
+{
+  auto isTwoK = [&k](TNode p) {
+    return (p.getKind() == Kind::EXP && p[0].isConst()
+            && p[0].getConst<Rational>() == Rational(2) && p[1] == k)
+           || (p.getKind() == Kind::POW2 && p[0] == k);
+  };
+  // (+ (- 1) 2^k)
+  if (a.getKind() == Kind::ADD && a.getNumChildren() == 2)
+  {
+    for (size_t j = 0; j < 2; j++)
+    {
+      if (a[j].isConst() && a[j].getConst<Rational>() == Rational(-1)
+          && isTwoK(a[1 - j]))
+      {
+        return true;
+      }
+    }
+  }
+  // (mod -1 2^k), (mod 2^k-1 2^k)
+  if ((a.getKind() == Kind::INTS_MODULUS_TOTAL
+       || a.getKind() == Kind::INTS_MODULUS)
+      && isTwoK(a[1]))
+  {
+    return (a[0].isConst() && a[0].getConst<Rational>() == Rational(-1))
+           || isPIAndOnes(a[0], k);
+  }
+  return false;
+}
+
 RewriteResponse ArithRewriter::postRewritePIAnd(TNode t)
 {
   // std::cout << "piand: " << t << std::endl;
    Assert(t.getKind() == Kind::PIAND);
    NodeManager* nm = d_nm;
+   // Rules of src/theory/pbv/rewrites-piand, compiled at build time.
+   if (d_piandRare)
+   {
+     Node r = pbv::rewritePiandRare(nm, t);
+     if (!r.isNull())
+     {
+       return RewriteResponse(REWRITE_AGAIN_FULL, r);
+     }
+   }
    // simplifications involving constants
    if(t[0].isConst() && (t[0].getConst<Rational>().sgn() == 0 || t[0].getConst<Rational>().sgn() == -1)) {
       return RewriteResponse(REWRITE_DONE, rewriter::mkConst(d_nm, Rational(0)));
+   }
+   if (d_piAndOnes)
+   {
+     for (size_t i = 1; i < 3; i++)
+     {
+       if (isPIAndOnes(t[i], t[0]))
+       {
+         // ((_ piand k) x 2^k-1) ---> (ite (> k 0) (mod x 2^k) 0)
+         // with 2^k-1 spelled any way the rewriter leaves it at symbolic k
+         // (--piand-ones-rewrite). The mod keeps the masking, as in the
+         // constant-k maxsign rule below; piand is 0 at k <= 0.
+         Node other = t[3 - i];
+         Node twok = nm->mkNode(Kind::EXP, nm->mkConstInt(Rational(2)), t[0]);
+         Node ret = nm->mkNode(
+             Kind::ITE,
+             nm->mkNode(Kind::GT, t[0], nm->mkConstInt(Rational(0))),
+             nm->mkNode(Kind::INTS_MODULUS_TOTAL, other, twok),
+             nm->mkConstInt(Rational(0)));
+         return RewriteResponse(REWRITE_AGAIN_FULL, ret);
+       }
+     }
    }
     for (unsigned i = 1; i < 3; i++)
     {
@@ -1329,6 +1408,16 @@ RewriteResponse ArithRewriter::postRewriteExp(TNode t)
     if (!ret.isNull())
     {
       return RewriteResponse(REWRITE_DONE, ret);
+    }
+  }
+
+  // Rules of src/theory/pbv/rewrites-exp, compiled at build time.
+  if (d_expRare)
+  {
+    Node r = pbv::rewriteExpRare(nm, t);
+    if (!r.isNull())
+    {
+      return RewriteResponse(REWRITE_AGAIN_FULL, r);
     }
   }
 

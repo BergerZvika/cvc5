@@ -43,6 +43,9 @@ namespace passes {
  * which leaves the solver only the guard to refute instead of a nonlinear
  * problem over the purified reciprocals.
  *
+ * With --arith-exact-div, an integer division div(N, D) is read as N / D when
+ * D provably divides N (see exactDiv in the implementation).
+ *
  * Nothing is emitted for a term under a quantifier.
  */
 class ArithRatIdentity : public PreprocessingPass

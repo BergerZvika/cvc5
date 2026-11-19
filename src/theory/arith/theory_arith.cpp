@@ -55,7 +55,10 @@ TheoryArith::TheoryArith(Env& env, OutputChannel& out, Valuation valuation)
                  options().arith.arithExp,
                  options().arith.expRewriteMode,
                  options().arith.expRewriteUnrollBound,
-                 options().arith.expLemmasMode),
+                 options().arith.expLemmasMode,
+                 options().arith.piAndOnesRewrite,
+                 options().arith.piandRareRewrites,
+                 options().arith.expRareRewrites),
       d_arithModelCacheSet(false),
       d_checker(nodeManager())
 {

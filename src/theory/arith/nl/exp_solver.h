@@ -148,6 +148,10 @@ class ExpSolver : protected EnvObj
    * that comes back in d_exps.
    */
   NodeSet d_halveIntroduced;
+  /** Pairs already given the --arith-exp-lemmas=divides-pair lemma. */
+  NodeSet d_dividesPairs;
+  /** Terms already given the --arith-exp-lemmas=divides-base lemma. */
+  NodeSet d_dividesBase;
   /** all exp terms
    * Cleared at each last call effort check.
    * */
@@ -211,6 +215,27 @@ class ExpSolver : protected EnvObj
    * exists, so it introduces no new terms.
    */
   void checkFuseBaseRefine();
+  /**
+   * Same-base divisibility (--arith-exp-lemmas=divides-pair). For every pair
+   * of EXP terms already in the problem whose model satisfies the antecedent
+   * but not the conclusion, emits
+   *
+   *   s1 = s2 /\ t1 >= 0 /\ 0 < exp(s1,t1) <= exp(s2,t2)
+   *     =>  exp(s2,t2) mod exp(s1,t1) = 0
+   *
+   * Introduces no EXP term.
+   */
+  void checkDividesPairRefine();
+  /**
+   * Divisibility by the base (--arith-exp-lemmas=divides-base), part of the
+   * initial refinement. Once for every EXP term with a non-constant exponent,
+   * emits
+   *
+   *   t != 0 /\ s != 0  =>  exp(s,t) mod s = 0
+   *
+   * Introduces no EXP term.
+   */
+  void checkDividesBaseInit();
   /**
    * neg-one as a full-refinement lemma: s = -1 /\ t < 0 => exp(s,t) =
    * exp(s,-t), emitted only when the candidate model satisfies the

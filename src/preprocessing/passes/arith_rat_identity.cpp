@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "expr/node_algorithm.h"
+#include "options/arith_options.h"
 #include "preprocessing/assertion_pipeline.h"
 #include "preprocessing/preprocessing_pass_context.h"
 #include "util/rational.h"
@@ -118,6 +119,628 @@ bool splitMonomials(TNode e, std::map<Node, Integer>& coefs, Integer& c)
   return true;
 }
 
+/** A polynomial over integer atoms: monomial (atom -> degree) -> coefficient. */
+using Mono = std::map<Node, uint32_t>;
+using Poly = std::map<Mono, Rational>;
+
+/** Bound on the monomials of a polynomial built by exactDiv. */
+const size_t s_polyCap = 4096;
+
+void polyAdd(Poly& p, const Poly& q, const Rational& c = Rational(1))
+{
+  for (const auto& [m, a] : q)
+  {
+    Rational& r = p[m];
+    r += c * a;
+    if (r.isZero())
+    {
+      p.erase(m);
+    }
+  }
+}
+
+Poly polyMul(const Poly& p, const Poly& q)
+{
+  Poly r;
+  for (const auto& [m1, a1] : p)
+  {
+    for (const auto& [m2, a2] : q)
+    {
+      Mono m = m1;
+      for (const auto& [v, k] : m2)
+      {
+        m[v] += k;
+      }
+      Rational& c = r[m];
+      c += a1 * a2;
+      if (c.isZero())
+      {
+        r.erase(m);
+      }
+    }
+  }
+  return r;
+}
+
+Poly polyConst(const Rational& c)
+{
+  Poly p;
+  if (!c.isZero())
+  {
+    p[Mono()] = c;
+  }
+  return p;
+}
+
+Poly polyAtom(const Node& a)
+{
+  Poly p;
+  p[Mono{{a, 1}}] = Rational(1);
+  return p;
+}
+
+/**
+ * The polynomial of the integer term t, reading t through subs. Fails on a
+ * non-integer atom or when the polynomial grows past s_polyCap.
+ */
+bool polyOf(TNode t,
+            const std::unordered_map<TNode, Node>& subs,
+            std::unordered_map<TNode, Poly>& cache,
+            Poly& out)
+{
+  auto it = cache.find(t);
+  if (it != cache.end())
+  {
+    out = it->second;
+    return true;
+  }
+  auto sit = subs.find(t);
+  Kind k = t.getKind();
+  Poly r;
+  if (sit != subs.end())
+  {
+    if (!polyOf(sit->second, subs, cache, r))
+    {
+      return false;
+    }
+  }
+  else if (t.isConst())
+  {
+    const Rational& c = t.getConst<Rational>();
+    if (!c.isIntegral())
+    {
+      return false;
+    }
+    r = polyConst(c);
+  }
+  else if (k == Kind::ADD || k == Kind::SUB)
+  {
+    for (size_t i = 0, n = t.getNumChildren(); i < n; ++i)
+    {
+      Poly q;
+      if (!polyOf(t[i], subs, cache, q))
+      {
+        return false;
+      }
+      polyAdd(r, q, Rational(k == Kind::SUB && i > 0 ? -1 : 1));
+    }
+  }
+  else if (k == Kind::NEG)
+  {
+    Poly q;
+    if (!polyOf(t[0], subs, cache, q))
+    {
+      return false;
+    }
+    polyAdd(r, q, Rational(-1));
+  }
+  else if (k == Kind::MULT || k == Kind::NONLINEAR_MULT)
+  {
+    r = polyConst(Rational(1));
+    for (const Node& c : t)
+    {
+      Poly q;
+      if (!polyOf(c, subs, cache, q))
+      {
+        return false;
+      }
+      r = polyMul(r, q);
+      if (r.size() > s_polyCap)
+      {
+        return false;
+      }
+    }
+  }
+  else if (t.getType().isInteger())
+  {
+    r = polyAtom(t);
+  }
+  else
+  {
+    return false;
+  }
+  cache[t] = r;
+  out = r;
+  return true;
+}
+
+/** p with every occurrence of the atom a replaced by q. */
+bool polySubst(const Poly& p, const Node& a, const Poly& q, Poly& out)
+{
+  out.clear();
+  std::vector<Poly> pows{polyConst(Rational(1))};
+  for (const auto& [m, c] : p)
+  {
+    Mono rest = m;
+    uint32_t d = 0;
+    auto it = rest.find(a);
+    if (it != rest.end())
+    {
+      d = it->second;
+      rest.erase(it);
+    }
+    while (pows.size() <= d)
+    {
+      pows.push_back(polyMul(pows.back(), q));
+      if (pows.back().size() > s_polyCap)
+      {
+        return false;
+      }
+    }
+    Poly term;
+    term[rest] = c;
+    polyAdd(out, polyMul(term, pows[d]));
+    if (out.size() > s_polyCap)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether p takes integer values at every integer point: its coefficients in
+ * the basis of products of binomials C(x, i) are integers. x^k is
+ * sum_i S(k,i) i! C(x,i), S the Stirling numbers of the second kind.
+ */
+bool polyIntValued(const Poly& p)
+{
+  // st[k][i] = S(k,i) * i!
+  std::vector<std::vector<Integer>> st{{Integer(1)}};
+  std::map<std::vector<std::pair<Node, uint32_t>>, Rational> basis;
+  for (const auto& [m, c] : p)
+  {
+    std::vector<std::pair<std::vector<std::pair<Node, uint32_t>>, Rational>>
+        acc{{{}, c}};
+    for (const auto& [v, k] : m)
+    {
+      if (k > 32)
+      {
+        return false;
+      }
+      while (st.size() <= k)
+      {
+        // S(k+1,i) i! = i * (S(k,i) + S(k,i-1)) (i-1)! ... in closed form:
+        // T(k+1,i) = i * (T(k,i) + T(k,i-1)) with T(k,i) = S(k,i) i!
+        const std::vector<Integer>& prev = st.back();
+        std::vector<Integer> next(prev.size() + 1, Integer(0));
+        for (size_t i = 1; i < next.size(); ++i)
+        {
+          Integer a = i < prev.size() ? prev[i] : Integer(0);
+          next[i] = Integer(i) * (a + prev[i - 1]);
+        }
+        st.push_back(next);
+      }
+      std::vector<std::pair<std::vector<std::pair<Node, uint32_t>>, Rational>>
+          nacc;
+      for (const auto& [key, a] : acc)
+      {
+        for (uint32_t i = 0; i <= k; ++i)
+        {
+          if (st[k][i].isZero())
+          {
+            continue;
+          }
+          auto nkey = key;
+          nkey.push_back({v, i});
+          nacc.push_back({nkey, a * Rational(st[k][i])});
+        }
+      }
+      acc.swap(nacc);
+    }
+    for (const auto& [key, a] : acc)
+    {
+      std::vector<std::pair<Node, uint32_t>> nkey;
+      for (const auto& e : key)
+      {
+        if (e.second > 0)
+        {
+          nkey.push_back(e);
+        }
+      }
+      basis[nkey] += a;
+    }
+  }
+  for (const auto& [key, a] : basis)
+  {
+    if (!a.isIntegral())
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether the integer division div(N, D) is exact, i.e. D divides N. For a
+ * constant D, N / D must be integer-valued. Otherwise D must be +-(s-1)^j for
+ * the base s of a power E = exp(s, m) that is the only power of base s in N;
+ * for m >= 0 the binomial theorem gives E = T + (s-1)^j * q with
+ * T = sum_{i<j} C(m,i) (s-1)^i and q an integer, so D divides N when it
+ * divides N[E := T] -- as a polynomial in s, with an integer-valued quotient.
+ * The guard m >= 0 is appended to guards.
+ */
+bool exactDiv(NodeManager* nm,
+              TNode t,
+              const std::unordered_map<TNode, Node>& subs,
+              std::unordered_map<TNode, Poly>& cache,
+              std::vector<Node>& guards)
+{
+  Poly pN, pD;
+  if (!polyOf(t[0], subs, cache, pN) || !polyOf(t[1], subs, cache, pD)
+      || pD.empty())
+  {
+    return false;
+  }
+  if (pD.size() == 1 && pD.begin()->first.empty())
+  {
+    Poly q;
+    polyAdd(q, pN, Rational(1) / pD.begin()->second);
+    if (polyIntValued(q))
+    {
+      return true;
+    }
+  }
+  std::unordered_set<Node> exps;
+  for (const auto& [m, c] : pN)
+  {
+    for (const auto& [v, k] : m)
+    {
+      if (v.getKind() == Kind::EXP)
+      {
+        exps.insert(v);
+      }
+    }
+  }
+  for (const Node& e : exps)
+  {
+    Node s = e[0];
+    bool unique = true;
+    for (const Node& o : exps)
+    {
+      unique = unique && (o == e || o[0] != s);
+    }
+    Poly pS, pM;
+    if (!unique || !polyOf(s, subs, cache, pS) || !polyOf(e[1], subs, cache, pM))
+    {
+      continue;
+    }
+    // the base is an atom or a constant
+    bool sConst = pS.empty() || (pS.size() == 1 && pS.begin()->first.empty());
+    bool sAtom = pS.size() == 1 && pS.begin()->second == Rational(1)
+                 && pS.begin()->first.size() == 1
+                 && pS.begin()->first.begin()->second == 1;
+    if (!sConst && !sAtom)
+    {
+      continue;
+    }
+    Poly pB = pS;
+    polyAdd(pB, polyConst(Rational(-1)));
+    if (pB.empty())
+    {
+      continue;
+    }
+    // j with pD = +-pB^j
+    uint32_t j = 0;
+    int sign = 0;
+    Poly pw = polyConst(Rational(1));
+    for (uint32_t i = 1; i <= 16 && sign == 0; ++i)
+    {
+      pw = polyMul(pw, pB);
+      Poly neg;
+      polyAdd(neg, pw, Rational(-1));
+      if (pw == pD || neg == pD)
+      {
+        j = i;
+        sign = pw == pD ? 1 : -1;
+      }
+    }
+    if (sign == 0)
+    {
+      continue;
+    }
+    // T = sum_{i<j} C(m,i) pB^i
+    Poly pT, binom = polyConst(Rational(1)), pBi = polyConst(Rational(1));
+    for (uint32_t i = 0; i < j; ++i)
+    {
+      polyAdd(pT, polyMul(binom, pBi));
+      Poly f = pM;
+      polyAdd(f, polyConst(Rational(-static_cast<int>(i))));
+      binom = polyMul(binom, f);
+      Poly sc;
+      polyAdd(sc, binom, Rational(1, static_cast<int>(i + 1)));
+      binom = sc;
+      pBi = polyMul(pBi, pB);
+    }
+    Poly pNT;
+    if (!polySubst(pN, e, pT, pNT))
+    {
+      continue;
+    }
+    Poly quot;
+    if (sConst)
+    {
+      polyAdd(quot, pNT, Rational(1) / pD.begin()->second);
+    }
+    else
+    {
+      // read s as b + 1 and divide by b^j
+      Node sv = pS.begin()->first.begin()->first;
+      Node b = nm->mkBoundVar("b", nm->integerType());
+      Poly bp1 = polyAtom(b);
+      polyAdd(bp1, polyConst(Rational(1)));
+      Poly pNb;
+      if (!polySubst(pNT, sv, bp1, pNb))
+      {
+        continue;
+      }
+      bool ok = true;
+      for (const auto& [m, c] : pNb)
+      {
+        auto it = m.find(b);
+        if (it == m.end() || it->second < j)
+        {
+          ok = false;
+          break;
+        }
+        Mono mq = m;
+        if (it->second == j)
+        {
+          mq.erase(b);
+        }
+        else
+        {
+          mq[b] = it->second - j;
+        }
+        quot[mq] = c * Rational(sign);
+      }
+      if (!ok)
+      {
+        continue;
+      }
+    }
+    if (polyIntValued(quot))
+    {
+      guards.push_back(
+          nm->mkNode(Kind::GEQ, e[1], nm->mkConstInt(Rational(0))));
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Exact division of p by d over Q, as polynomials: the quotient q with
+ * p = d * q, by long division in an atom z of d whose leading coefficient is
+ * a constant. Fails on a non-zero remainder.
+ */
+bool polyDivExact(const Poly& p, const Poly& d, Poly& q)
+{
+  q.clear();
+  if (d.empty())
+  {
+    return false;
+  }
+  if (d.size() == 1 && d.begin()->first.empty())
+  {
+    polyAdd(q, p, Rational(1) / d.begin()->second);
+    return true;
+  }
+  // the main variable z and the degree of d in it
+  Node z;
+  uint32_t dz = 0;
+  for (const auto& [m, c] : d)
+  {
+    for (const auto& [v, k] : m)
+    {
+      if (k > dz)
+      {
+        z = v;
+        dz = k;
+      }
+    }
+  }
+  // the leading coefficient of d in z must be a constant
+  Rational lc;
+  for (const auto& [m, c] : d)
+  {
+    auto it = m.find(z);
+    if (it != m.end() && it->second == dz)
+    {
+      if (m.size() != 1 || !lc.isZero())
+      {
+        return false;
+      }
+      lc = c;
+    }
+  }
+  Poly r = p;
+  for (size_t iter = 0; !r.empty(); ++iter)
+  {
+    if (iter > s_polyCap || r.size() > s_polyCap)
+    {
+      return false;
+    }
+    // a term of r of highest degree in z
+    const Mono* lm = nullptr;
+    uint32_t lz = 0;
+    for (const auto& [m, c] : r)
+    {
+      auto it = m.find(z);
+      uint32_t k = it == m.end() ? 0 : it->second;
+      if (lm == nullptr || k > lz)
+      {
+        lm = &m;
+        lz = k;
+      }
+    }
+    if (lz < dz)
+    {
+      return false;
+    }
+    Mono tm = *lm;
+    if (lz == dz)
+    {
+      tm.erase(z);
+    }
+    else
+    {
+      tm[z] = lz - dz;
+    }
+    Poly t;
+    t[tm] = r.at(*lm) / lc;
+    polyAdd(q, t);
+    polyAdd(r, polyMul(t, d), Rational(-1));
+  }
+  return true;
+}
+
+/**
+ * Whether div(N, D) is exact, by induction on the exponent. N must be
+ * C * E + R(v) for the only power E = exp(s, v + c) of base s in N, where v is
+ * an atom, and C, s and D do not mention v. Then for v + c >= 0:
+ *   base  (v = -c, E = 1):  D divides C + R(-c)
+ *   step  (E(v+1) = s E(v)): N(v+1) - s N(v) = R(v+1) - s R(v), divisible by D
+ * each with an integer-valued quotient, so D divides N for every v >= -c.
+ * The guard v + c >= 0 is appended to guards.
+ */
+bool exactDivInduction(NodeManager* nm,
+                       TNode t,
+                       const std::unordered_map<TNode, Node>& subs,
+                       std::unordered_map<TNode, Poly>& cache,
+                       std::vector<Node>& guards)
+{
+  Poly pN, pD;
+  if (!polyOf(t[0], subs, cache, pN) || !polyOf(t[1], subs, cache, pD)
+      || pD.empty())
+  {
+    return false;
+  }
+  std::unordered_set<Node> exps;
+  for (const auto& [m, c] : pN)
+  {
+    for (const auto& [v, k] : m)
+    {
+      if (v.getKind() == Kind::EXP)
+      {
+        exps.insert(v);
+      }
+    }
+  }
+  for (const Node& e : exps)
+  {
+    Poly pM;
+    if (!polyOf(e[1], subs, cache, pM))
+    {
+      continue;
+    }
+    // the exponent is v + c
+    Node v;
+    Rational c;
+    bool ok = true;
+    for (const auto& [m, a] : pM)
+    {
+      if (m.empty())
+      {
+        c = a;
+      }
+      else if (v.isNull() && m.size() == 1 && m.begin()->second == 1
+               && a == Rational(1))
+      {
+        v = m.begin()->first;
+      }
+      else
+      {
+        ok = false;
+      }
+    }
+    if (!ok || v.isNull() || expr::hasSubterm(e[0], v))
+    {
+      continue;
+    }
+    // no other atom of N or D mentions v or E; C does not mention v
+    Poly pC, pR;
+    for (const auto& [m, a] : pN)
+    {
+      auto it = m.find(e);
+      uint32_t de = it == m.end() ? 0 : it->second;
+      for (const auto& [x, k] : m)
+      {
+        ok = ok && (x == v || x == e || !expr::hasSubterm(x, v));
+      }
+      if (de > 1 || (de == 1 && m.count(v)))
+      {
+        ok = false;
+      }
+      Mono rest = m;
+      rest.erase(e);
+      (de == 1 ? pC : pR)[rest] = a;
+    }
+    for (const auto& [m, a] : pD)
+    {
+      for (const auto& [x, k] : m)
+      {
+        ok = ok && x != e && !expr::hasSubterm(x, v);
+      }
+    }
+    if (!ok)
+    {
+      continue;
+    }
+    Poly pS;
+    if (!polyOf(e[0], subs, cache, pS))
+    {
+      continue;
+    }
+    // base: v = -c, E = 1
+    Poly base = pC, rBase, vNext = polyAtom(v), q;
+    if (!polySubst(pR, v, polyConst(-c), rBase))
+    {
+      continue;
+    }
+    polyAdd(base, rBase);
+    if (!polyDivExact(base, pD, q) || !polyIntValued(q))
+    {
+      continue;
+    }
+    // step: R(v+1) - s R(v)
+    polyAdd(vNext, polyConst(Rational(1)));
+    Poly step;
+    if (!polySubst(pR, v, vNext, step))
+    {
+      continue;
+    }
+    polyAdd(step, polyMul(pS, pR), Rational(-1));
+    if (!polyDivExact(step, pD, q) || !polyIntValued(q))
+    {
+      continue;
+    }
+    guards.push_back(nm->mkNode(Kind::GEQ, e[1], nm->mkConstInt(Rational(0))));
+    return true;
+  }
+  return false;
+}
+
 /** The integer value of `n` if it is a constant integer >= 2. */
 bool constBase(TNode n, Integer& b)
 {
@@ -140,6 +763,8 @@ PreprocessingPassResult ArithRatIdentity::applyInternal(
     AssertionPipeline* assertionsToPreprocess)
 {
   NodeManager* nm = nodeManager();
+  const bool exactDivOn = options().arith.arithExactDiv;
+  const bool exactDivIndOn = options().arith.arithExactDivInduction;
 
   // The equalities to process, in order of first appearance.
   std::vector<Node> atoms;
@@ -191,7 +816,10 @@ PreprocessingPassResult ArithRatIdentity::applyInternal(
         continue;
       }
       Kind k = cur.getKind();
-      if (k == Kind::DIVISION || k == Kind::DIVISION_TOTAL)
+      if (k == Kind::DIVISION || k == Kind::DIVISION_TOTAL
+          || ((exactDivOn || exactDivIndOn)
+              && (k == Kind::INTS_DIVISION
+                  || k == Kind::INTS_DIVISION_TOTAL)))
       {
         hasDiv = true;
       }
@@ -388,6 +1016,7 @@ PreprocessingPassResult ArithRatIdentity::applyInternal(
     // L - R as a fraction, treating every non-arithmetic subterm as an atom.
     // A divisor y adds the guard y != 0.
     std::unordered_map<TNode, Frac> cache;
+    std::unordered_map<TNode, Poly> polys;
     Node one = nm->mkConstInt(Rational(1));
     std::function<Frac(TNode)> frac = [&](TNode t) -> Frac {
       auto it = cache.find(t);
@@ -442,6 +1071,20 @@ PreprocessingPassResult ArithRatIdentity::applyInternal(
         guards.push_back(
             t[1].eqNode(nm->mkConstRealOrInt(t[1].getType(), Rational(0)))
                 .notNode());
+        r = {nm->mkNode(Kind::MULT, x.num, y.den),
+             nm->mkNode(Kind::MULT, x.den, y.num)};
+      }
+      else if ((exactDivOn || exactDivIndOn)
+               && (k == Kind::INTS_DIVISION || k == Kind::INTS_DIVISION_TOTAL)
+               && ((exactDivOn && exactDiv(nm, t, subs, polys, guards))
+                   || (exactDivIndOn
+                       && exactDivInduction(nm, t, subs, polys, guards))))
+      {
+        // an exact div is the real division
+        Frac x = frac(t[0]);
+        Frac y = frac(t[1]);
+        guards.push_back(
+            t[1].eqNode(nm->mkConstInt(Rational(0))).notNode());
         r = {nm->mkNode(Kind::MULT, x.num, y.den),
              nm->mkNode(Kind::MULT, x.den, y.num)};
       }

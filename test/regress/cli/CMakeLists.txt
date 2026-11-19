@@ -1129,6 +1129,11 @@ set(regress_0_tests
   regress0/pbv/learned-rewrite-mod-nested.smt2
   regress0/pbv/pbv-mw-mask-facts.smt2
   regress0/pbv/pbv-mw-shift-bitwise-sat.smt2
+  regress0/pbv/pbv-shift-add-distrib-sound-sat.smt2
+  regress0/pbv/pbv-shift-add-distrib-sound-unsat.smt2
+  regress0/pbv/piand-rare-rewrites.smt2
+  regress0/pbv/exp-rare-rewrites.smt2
+  regress0/pbv/exp-rare-unroll.smt2
   regress0/pbv/pbv-mw-shift-bitwise.smt2
   regress0/pbv/pbv-mw-sign-idioms.smt2
   regress0/pbv/pbv-div-lemmas.smt2

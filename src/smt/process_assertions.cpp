@@ -256,7 +256,7 @@ bool ProcessAssertions::apply(AssertionPipeline& ap)
       || options().smt.pbvMwTruncPush || options().smt.pbvMwLowMask
       || options().smt.pbvMwExtBitwise || options().smt.pbvMwSextBv1
       || options().smt.pbvMwSextIdioms || options().smt.pbvMwShiftBitwise
-      || options().smt.pbvMwSignIdioms)
+      || options().smt.pbvMwSignIdioms || options().smt.pbvRewritesMin)
   {
     applyPass("pbv-mw", ap);
   }

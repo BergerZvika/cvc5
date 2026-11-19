@@ -18,6 +18,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -338,7 +339,36 @@ def gen_individual_rewrite_db(rewrites_file: Path, template, flag_expert):
                                 rules='\n'.join(rules_code))))
     return db
 
+
+def add_missing_rules_to_enum(header_path, ids, doc, mtime):
+    """
+    Append to the source enum any rule it does not list yet. The source header
+    is the one that gets compiled, so a new rule name does not build without
+    this. Names are only ever added: dropping a rule from the enum as well would
+    recompile everything that includes this API header when a rule is removed,
+    and again when it is put back.
+
+    The header gets the given mtime, from before the generated files were
+    written, so that it does not make them look stale on the next build.
+    """
+    marker = '// ${rules}$'
+    with open(header_path) as f:
+        text = f.read()
+    start = text.index(marker)
+    end = text.index(marker, start + len(marker))
+    missing = [i for i in ids if f'EVALUE({i})' not in text[start:end]]
+    if not missing:
+        return
+    new_lines = ''.join(f'{doc(i)}\n  EVALUE({i}),\n' for i in missing)
+    with open(header_path, 'w') as f:
+        f.write(text[:end] + new_lines + text[end:])
+    os.utime(header_path, (mtime, mtime))
+    print(f'mkrewrites: added {", ".join(missing)} to {header_path}; everything'
+          ' that includes this header will recompile')
+
+
 def gen_rewrite_db(args):
+    start_time = time.time()
     block_tpl = '''
         {{
             // from {filename}
@@ -373,6 +403,9 @@ def gen_rewrite_db(args):
     def doc(rule: str):
         rule = rule.lower().replace('_', '-')
         return f'  /** Auto-generated from RARE rule {rule} */'
+
+    add_missing_rules_to_enum(
+        os.path.join(src_include_dir, 'cvc5_proof_rule.h'), ids, doc, start_time)
 
     # Note that we do not automatically clang-format the API include file,
     # since this breaks the documentation for latex formulas which require

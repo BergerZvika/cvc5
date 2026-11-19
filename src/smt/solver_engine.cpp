@@ -896,10 +896,10 @@ Result SolverEngine::checkSatInternal(const std::vector<Node>& assumptions)
   }
 
   // --check-lemmas: the lemmas recorded during this check-sat are tested
-  // (or dumped) by runPendingLemmaCheck, which the check-sat command calls in
-  // place of printing the answer -- under this option the answer to the input
-  // formula is suppressed and the verdict on the lemmas is the only output.
-  // Every answer is checked, not only UNSAT, so that output always appears.
+  // (or dumped) by runPendingLemmaCheck, which the check-sat command calls
+  // BEFORE printing the answer; the verdict line follows the answer, and an
+  // invalid lemma replaces the answer by an error. Every answer is checked,
+  // not only UNSAT.
   if (d_env->getOptions().smt.checkLemmas != options::CheckLemmasMode::NONE)
   {
     d_lemmaCheckPending = true;
@@ -1775,9 +1775,7 @@ void SolverEngine::checkLemmas()
                       << std::endl;
     if (doCheck)
     {
-      // the empty conjunction is trivially satisfiable
-      *d_env->getOptions().base.out << "sat" << std::endl
-                                    << "lemmas ok (0 checked)" << std::endl;
+      d_lemmaCheckVerdict = "lemmas ok (0 checked)\n";
     }
     return;
   }
@@ -2087,14 +2085,12 @@ void SolverEngine::checkLemmas()
   d_env->verbose(1) << "SolverEngine::checkLemmas(): done, " << lemmas.size()
                     << " lemmas, " << unknowns << " inconclusive"
                     << std::endl;
-  // The output of the run: the answer on the lemma formula (the conjunction
-  // of all recorded lemmas), then the verdict -- every lemma passed and every
-  // sub-query was conclusive -> "lemmas ok"; nothing failed but some
-  // sub-query returned unknown / timed out -> "lemmas unknown". A failure
-  // never reaches here: an unsat conjunction or an invalid lemma raised above.
-  std::ostream& out = *d_env->getOptions().base.out;
-  out << (consistency.getStatus() == Result::SAT ? "sat" : "unknown")
-      << std::endl;
+  // The verdict, printed after the answer to the input formula: every lemma
+  // passed and every sub-query was conclusive -> "lemmas ok"; nothing failed
+  // but some sub-query returned unknown / timed out -> "lemmas unknown". A
+  // failure never reaches here: an unsat conjunction or an invalid lemma
+  // raised above, before the answer was printed.
+  std::stringstream out;
   if (unknowns == 0)
   {
     out << "lemmas ok (" << lemmas.size() << " checked)" << std::endl;
@@ -2105,6 +2101,14 @@ void SolverEngine::checkLemmas()
         << " of " << (lemmas.size() + 1)
         << " sub-queries inconclusive, none failed)" << std::endl;
   }
+  d_lemmaCheckVerdict = out.str();
+}
+
+std::string SolverEngine::takeLemmaCheckVerdict()
+{
+  std::string v;
+  v.swap(d_lemmaCheckVerdict);
+  return v;
 }
 
 void SolverEngine::runPendingLemmaCheck()

@@ -108,6 +108,8 @@ class PbvMw : public PreprocessingPass
   Node lrSignIdiomsAddIte(Node n, size_t i);
   /** K1, K2, K3. */
   Node lrMaskFacts(Node n);
+  /** K4. */
+  Node lrSubsetFacts(Node n);
   /** F, E, E2, M2, M3, A/B. */
   Node lrRules(Node n);
 
@@ -153,6 +155,14 @@ class PbvMw : public PreprocessingPass
    * none fires.
    */
   Node applyExtNorm(Node n);
+  /**
+   * The rules of the RW_B table (--pbv-rewrites-min) that live in this pass.
+   * Returns n when none fires.
+   */
+  Node applyMin(Node n);
+  /** Is `s` the value k-1 at its own width k (`int_to_pbv(k, k-1)` or
+   * `int_to_pbv(k, k) - int_to_pbv(k, 1)`)? Sets `k` when it is. */
+  bool isWidthMinusOne(TNode s, Node& k);
   /** The low extract t[i:0], itself normalized (--pbv-mw-trunc-push). */
   Node mkLowExtract(TNode t, Node i);
   /** Is `a <= b` known: equal after rewriting, or entailed by the facts? */

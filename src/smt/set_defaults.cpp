@@ -289,7 +289,7 @@ void SetDefaults::setDefaultsPre(Options& opts)
         "preprocess-mw,sext-to-zext,shift-add-distrib,mask-slice,int",
         reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
-        arith, piAndLemmaMode, options::PIAndLemmaMode::COMPLEMENT, reason);
+        arith, piAndLemmaMode, std::string("complement"), reason);
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
     // Lift UF symbols with the terms, so QF_UFBV inputs type-check after
@@ -463,6 +463,26 @@ void SetDefaults::setDefaultsPre(Options& opts)
     }
     return out;
   };
+  // --piand-lemmas: only validated here, the PIAND solver parses the list
+  parseFeatures(opts.arith.piAndLemmaMode,
+                {"carry",
+                 "lsb",
+                 "width-monotone",
+                 "complement",
+                 "complement-existing",
+                 "complement-both",
+                 "complement-sym",
+                 "mask",
+                 "lean",
+                 "low-c-bits",
+                 "align",
+                 "align-id",
+                 "mask-sym",
+                 "overlap-lb",
+                 "subset-trans",
+                 "subset-mono",
+                 "pow2-idiom"},
+                "piand-lemmas");
   // --exp-solver: exp-rewrites, exp-lemmas, exp-phasing
   {
     std::set<std::string> f = parseFeatures(
@@ -476,10 +496,12 @@ void SetDefaults::setDefaultsPre(Options& opts)
       };
       if (f.count("lemmas"))
       {
-        // --arith-exp-lemmas=all without phasing, const and unroll
+        // --arith-exp-lemmas=all without phasing, const and unroll, plus the
+        // explicit-only divides-pair and divides-base
         addTok(
             "symmetry,prime,induction,interpolation,compose,fuse,fuse-base,"
-            "fuse-model,mon,negone-parity,halving,neg-recip");
+            "fuse-model,mon,negone-parity,halving,neg-recip,divides-pair,"
+            "divides-base");
       }
       if (f.count("rewrites"))
       {
@@ -527,10 +549,24 @@ void SetDefaults::setDefaultsPre(Options& opts)
     {
       SET_AND_NOTIFY_IF_NOT_USER(arith, arithPow2Norm, true, reason);
     }
-    if (add)
+    // multiply also clears denominators: it merges shifted powers into the
+    // smallest one, and rat-identity is what turns the resulting rational
+    // identity into a polynomial one (PURRS 32 -> 36)
+    if (add || mul)
     {
       SET_AND_NOTIFY_IF_NOT_USER(arith, arithRatIdentity, true, reason);
     }
+  }
+  // exact div is read by the rat-identity pass, which must run
+  if (opts.arith.arithExactDiv)
+  {
+    SET_AND_NOTIFY_IF_NOT_USER(
+        arith, arithRatIdentity, true, "--arith-exact-div");
+  }
+  if (opts.arith.arithExactDivInduction)
+  {
+    SET_AND_NOTIFY_IF_NOT_USER(
+        arith, arithRatIdentity, true, "--arith-exact-div-induction");
   }
   // --pbv-rewrites: the T_PBV rewrites without side conditions
   if (opts.smt.pbvRewrites)
@@ -553,9 +589,45 @@ void SetDefaults::setDefaultsPre(Options& opts)
     SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
         smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
     SET_AND_NOTIFY_IF_NOT_USER(smt, pbvDivLemmas, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAndNot, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwOrNot, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwOrNotSimple, true, reason);
+  }
+  // --pbv-rewrites-tuned: the families of --pbv-rewrites that survived the
+  // per-family ablation and its leave-one-out. Leaves out cav26 and
+  // mask-slice=all (M1 inverts W1 of shift-bitwise and the two loop), and
+  // rw-ac, ext-bitwise and sign-idioms, which add nothing on top of the rest.
+  if (opts.smt.pbvRewritesTuned)
+  {
+    const char* reason = "--pbv-rewrites-tuned";
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwBool, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvMwShiftBitwise, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvRwAndNot, true, reason);
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvUtsMode, options::PbvUtsMode::FLIP, reason);
+    SET_AND_NOTIFY_IF_NOT_USER(smt, pbvDivLemmas, true, reason);
+  }
+  // --pbv-learned-rewrites-min: the pbv-min token, added even to an explicit
+  // --learned-rewrite-rules list -- this flag was given explicitly too.
+  if (opts.smt.pbvLearnedRewritesMin)
+  {
+    std::string& cur = opts.write_smt().learnedRewriteRules;
+    std::string next =
+        cur == "none" || cur.empty() ? "pbv-min" : cur + ",pbv-min";
+    notifyModifyOption(options::smt::longName::learnedRewriteRules,
+                       next,
+                       "--pbv-learned-rewrites-min");
+    cur = next;
+  }
+  // --pbv-rewrites-min: the rules of the RW_B table only. They are gated on
+  // the flag itself (rewriter and pbv-mw); flip is the one that is a mode.
+  if (opts.smt.pbvRewritesMin)
+  {
+    SET_AND_NOTIFY_IF_NOT_USER_VAL_SYM(
+        smt, pbvUtsMode, options::PbvUtsMode::FLIP, "--pbv-rewrites-min");
   }
 
-  // --pbv-rw-mw=all: the tuned PBV preprocessing line in one flag. The
+  // --pbv-rw-mw=all:the tuned PBV preprocessing line in one flag. The
   // rewriter itself runs the cav26 family for this mode. --pbv-rw-mw=all-no-bug
   // sets the same line, but the rewriter does not run cav26 for it (its rules
   // drop the operands of an n-ary pbvand).

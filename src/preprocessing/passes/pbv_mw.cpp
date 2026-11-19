@@ -177,6 +177,10 @@
  *        its operands, and a', b' drop every xor/or operand disjoint from M
  *    K3  ite(x & m = 0, x & m', x)  ->  x        m, m' complements: when x
  *        has no bit of m, x & ~m is x
+ *    K4  (~a | b) = ones        ->  (a & b) = a    w(ones) = w(a)
+ *        (--learned-rewrite-rules=subset-facts): both say every bit of a is
+ *        a bit of b; the right side keeps no complement and no ones constant,
+ *        so after int-blasting a subset fact is the single piand(k,a,b) = a
  */
 
 #include "preprocessing/passes/pbv_mw.h"
@@ -831,12 +835,240 @@ Node PbvMw::applyExtNorm(Node n)
 
 /* == rewriting ============================================================= */
 
+/* == the RW_B table (--pbv-rewrites-min) =================================== */
+
+bool PbvMw::isWidthMinusOne(TNode s, Node& k)
+{
+  Node w = widthMinusOne(s);
+  if (!w.isNull())
+  {
+    k = w;
+    return true;
+  }
+  if (s.getKind() == Kind::INT_TO_PBV && s.getNumChildren() == 2
+      && widthEq(s[1],
+                 nodeManager()->mkNode(
+                     Kind::SUB, s[0], nodeManager()->mkConstInt(Rational(1)))))
+  {
+    k = s[0];
+    return true;
+  }
+  return false;
+}
+
+Node PbvMw::applyMin(Node n)
+{
+  const options::HolderSMT& o = options().smt;
+  if (!o.pbvRewritesMin)
+  {
+    return n;
+  }
+  NodeManager* nm = nodeManager();
+  Kind k = n.getKind();
+  size_t nc = n.getNumChildren();
+  auto isBitwise = [](Kind kk) {
+    return kk == Kind::PBV_AND || kk == Kind::PBV_OR || kk == Kind::PBV_XOR;
+  };
+  auto isShiftK = [](Kind kk) {
+    return kk == Kind::PBV_SHL || kk == Kind::PBV_LSHR || kk == Kind::PBV_ASHR;
+  };
+  // the ONES constant inside a mask must itself be admissible
+  auto onesAdmissible = [&](TNode c) {
+    return c.getKind() == Kind::INT_TO_PBV ? admissible(c) : admissible(c[0]);
+  };
+  auto isOnesShift = [&](TNode m, Kind sk) {
+    return m.getKind() == sk && isOnes(m[0]) && admissible(m)
+           && onesAdmissible(m[0]);
+  };
+  const bool binBitwise = isBitwise(k) && nc == 2;
+
+  if (k == Kind::PBV_AND && nc == 2 && admissible(n))
+  {
+    for (size_t i = 0; i < 2; ++i)
+    {
+      TNode m = n[i], x = n[1 - i];
+      // and-lshr-mask: (~0 >> z) & (x >> z) -> x >> z. Ahead of shl-lshr and
+      // shift-bitwise, which also match and would leave a mask behind.
+      if (isOnesShift(m, Kind::PBV_LSHR) && x.getKind() == Kind::PBV_LSHR
+          && x[1] == m[1] && admissible(x))
+      {
+        bump("min-and-lshr-mask");
+        return x;
+      }
+    }
+    // shl-lshr / lshr-shl, skipped under W2 (their inverse)
+    for (size_t i = 0; i < 2 && !d_cond.d_shiftBitwise; ++i)
+    {
+      TNode m = n[i], x = n[1 - i];
+      // x & (~0 >> z) -> (x << z) >> z
+      if (isOnesShift(m, Kind::PBV_LSHR))
+      {
+        bump("min-shl-lshr");
+        return nm->mkNode(
+            Kind::PBV_LSHR, nm->mkNode(Kind::PBV_SHL, x, m[1]), m[1]);
+      }
+      // x & (~0 << z) -> (x >> z) << z
+      if (isOnesShift(m, Kind::PBV_SHL))
+      {
+        bump("min-lshr-shl");
+        return nm->mkNode(
+            Kind::PBV_SHL, nm->mkNode(Kind::PBV_LSHR, x, m[1]), m[1]);
+      }
+    }
+  }
+
+  // shift-bitwise: (x sh z) o (y sh z) -> (x o y) sh z, skipped under W1
+  // (its inverse)
+  if (binBitwise && !(o.pbvMwShiftBitwise && o.pbvMwShiftBitwiseW1)
+      && isShiftK(n[0].getKind())
+      && n[1].getKind() == n[0].getKind() && n[0][1] == n[1][1]
+      && admissible(n) && admissible(n[0]) && admissible(n[1]))
+  {
+    bump("min-shift-bitwise");
+    return nm->mkNode(n[0].getKind(),
+                      rewriteRec(nm->mkNode(k, n[0][0], n[1][0])),
+                      n[0][1]);
+  }
+
+  // bitwise-sext / bitwise-zext: ext(n,x) o ext(n,y) -> ext(n, x o y)
+  if (binBitwise && isExtend(n[0]) && n[1].getKind() == n[0].getKind()
+      && widthEq(n[0][0], n[1][0]) && admissible(n) && admissible(n[0])
+      && admissible(n[1]))
+  {
+    bump("min-bitwise-ext");
+    return nm->mkNode(n[0].getKind(),
+                      n[0][0],
+                      rewriteRec(nm->mkNode(k, n[0][1], n[1][1])));
+  }
+
+  // sext-sext / zext-zext: ext(n, ext(m, x)) -> ext(n+m, x)
+  if (isExtend(n) && nc == 2 && n[1].getKind() == k && admissible(n)
+      && admissible(n[1]))
+  {
+    bump("min-ext-ext");
+    return nm->mkNode(
+        k, rewrite(nm->mkNode(Kind::ADD, n[0], n[1][0])), n[1][1]);
+  }
+
+  // sext-zero / zext-zero: ext(n, 0) -> 0
+  if (isExtend(n) && nc == 2 && isZero(n[1]) && admissible(n)
+      && admissible(n[1]))
+  {
+    bump("min-ext-zero");
+    return nm->mkNode(
+        Kind::INT_TO_PBV, widthOf(n), nm->mkConstInt(Rational(0)));
+  }
+
+  // sext-ite / zext-ite: ite(c, ext(n,x), ext(n,y)) -> ext(n, ite(c,x,y)),
+  // skipped under I2 (its inverse)
+  if (k == Kind::ITE && !o.pbvMwSextIdioms && n.getType().isPbv()
+      && isExtend(n[1]) && n[2].getKind() == n[1].getKind()
+      && widthEq(n[1][0], n[2][0]) && admissible(n) && admissible(n[1])
+      && admissible(n[2]))
+  {
+    bump("min-ext-ite");
+    return nm->mkNode(
+        n[1].getKind(),
+        n[1][0],
+        rewriteRec(nm->mkNode(Kind::ITE, n[0], n[1][1], n[2][1])));
+  }
+
+  // sign-bit-and: x & (1 << (k-1)) = 0 -> ~(x <s 0)
+  if (k == Kind::EQUAL && n[0].getType().isPbv() && admissible(n))
+  {
+    for (size_t s = 0; s < 2; ++s)
+    {
+      TNode a = n[s], z = n[1 - s];
+      if (!isZero(z) || a.getKind() != Kind::PBV_AND || a.getNumChildren() != 2
+          || !admissible(a))
+      {
+        continue;
+      }
+      for (size_t j = 0; j < 2; ++j)
+      {
+        TNode m = a[j];
+        Node w;
+        if (m.getKind() == Kind::PBV_SHL && m[0].getKind() == Kind::INT_TO_PBV
+            && m[0][1].isConst()
+            && m[0][1].getConst<Rational>() == Rational(1)
+            && isWidthMinusOne(m[1], w) && widthEq(w, m[0][0])
+            && admissible(m))
+        {
+          bump("min-sign-bit-and");
+          return nm->mkNode(Kind::PBV_SLT, a[1 - j], z).notNode();
+        }
+      }
+    }
+  }
+
+  // ashr-sign: x >>a (k-1) -> ite(x <s 0, ~0, 0)
+  {
+    Node w;
+    if (k == Kind::PBV_ASHR && nc == 2 && isWidthMinusOne(n[1], w)
+        && admissible(n))
+    {
+      Node z = nm->mkNode(Kind::INT_TO_PBV, w, nm->mkConstInt(Rational(0)));
+      bump("min-ashr-sign");
+      return nm->mkNode(Kind::ITE,
+                        nm->mkNode(Kind::PBV_SLT, n[0], z),
+                        nm->mkNode(Kind::PBV_NOT, z),
+                        z);
+    }
+  }
+
+  // and/or/xor/add-ite-mask on m = ite(c, 0, ~0)
+  if ((binBitwise || (k == Kind::PBV_ADD && nc == 2)) && admissible(n))
+  {
+    for (size_t i = 0; i < 2; ++i)
+    {
+      TNode m = n[i];
+      Node x = n[1 - i];
+      if (m.getKind() != Kind::ITE || !isZero(m[1]) || !isOnes(m[2])
+          || !admissible(m))
+      {
+        continue;
+      }
+      TNode c = m[0];
+      bump("min-ite-mask");
+      switch (k)
+      {
+        // ite(c, 0, x)
+        case Kind::PBV_AND: return nm->mkNode(Kind::ITE, c, m[1], x);
+        // ite(c, x, ~0)
+        case Kind::PBV_OR: return nm->mkNode(Kind::ITE, c, x, m[2]);
+        // ite(c, x, ~x)
+        case Kind::PBV_XOR:
+          return nm->mkNode(Kind::ITE, c, x, nm->mkNode(Kind::PBV_NOT, x));
+        // ite(c, x, x - 1)
+        default:
+          return nm->mkNode(
+              Kind::ITE,
+              c,
+              x,
+              nm->mkNode(Kind::PBV_SUB,
+                         x,
+                         nm->mkNode(Kind::INT_TO_PBV,
+                                    m[1][0],
+                                    nm->mkConstInt(Rational(1)))));
+      }
+    }
+  }
+  return n;
+}
+
 Node PbvMw::applyRules(Node n)
 {
   NodeManager* nm = nodeManager();
   Node one = nm->mkConstInt(Rational(1));
   Kind k = n.getKind();
 
+  {
+    Node m = applyMin(n);
+    if (m != n)
+    {
+      return m;
+    }
+  }
   {
     Node e = applyExtNorm(n);
     if (e != n)
@@ -1133,6 +1365,20 @@ void PbvMw::harvestMaskFacts(const std::vector<Node>& assertions)
           }
         }
       }
+      // (M + 1) & M = 0, the same fact as written in the paper: M is a low
+      // mask
+      for (size_t j = 0; j < 2; ++j)
+      {
+        TNode y = l[j], m = l[1 - j];
+        if (y.getKind() != Kind::PBV_ADD || y.getNumChildren() != 2)
+        {
+          continue;
+        }
+        for (size_t q = 0; q < 2; ++q)
+        {
+          if (y[q] == m && isOne(y[1 - q])) d_lowMaskFacts.insert(m);
+        }
+      }
     }
   }
 }
@@ -1255,7 +1501,7 @@ Node PbvMw::applyBitwise(Node n)
     return kk == Kind::PBV_SHL || kk == Kind::PBV_LSHR || kk == Kind::PBV_ASHR;
   };
 
-  if (o.pbvMwShiftBitwise)
+  if (o.pbvMwShiftBitwise && o.pbvMwShiftBitwiseW1)
   {
     // W1: a shift distributes over and/or/xor (ashr also over not)
     if (isShiftK(k) && n.getNumChildren() == 2 && isBitwise(n[0].getKind()))
@@ -1392,6 +1638,14 @@ Node PbvMw::applyBitwise(Node n)
     }
   }
 
+  // K4 (conditional, learned-rewrite-pbv)
+  {
+    Node r = lrSubsetFacts(n);
+    if (r != n)
+    {
+      return r;
+    }
+  }
   // K1, K2, K3 (conditional, learned-rewrite-pbv)
   return lrMaskFacts(n);
 }
@@ -1468,7 +1722,7 @@ PreprocessingPassResult PbvMw::applyInternal(
   if (o.pbvMwTruncPush || o.pbvMwLowMask || o.pbvMwExtBitwise
       || o.pbvMwSextBv1 || o.pbvMwSextIdioms || d_cond.d_truncPush
       || d_cond.d_extBitwise || d_cond.d_sextBv1 || d_cond.d_sextIdioms
-      || d_cond.d_signedRange || bitwise)
+      || d_cond.d_signedRange || bitwise || o.pbvRewritesMin)
   {
     std::vector<Node> adm;
     pinAdmissibility(all, adm);
@@ -1516,7 +1770,7 @@ PreprocessingPassResult PbvMw::applyInternal(
         }
       }
     }
-    if (d_cond.d_maskFacts)
+    if (d_cond.d_maskFacts || d_cond.d_maskFactsIte)
     {
       std::vector<Node> now;
       for (size_t i = 0; i < numOriginal; ++i)

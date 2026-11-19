@@ -957,14 +957,22 @@ class CVC5_EXPORT SolverEngine
  public:
   /**
    * --check-lemmas: run the lemma tests deferred by the last check-sat, if
-   * any. Called by the check-sat command AFTER the answer has been printed,
-   * so the verdict (or error) follows the sat/unsat line.
+   * any. Called by the check-sat command BEFORE the answer is printed: an
+   * invalid lemma raises an error and the answer is never printed. The
+   * verdict line is kept for takeLemmaCheckVerdict.
    */
   void runPendingLemmaCheck();
+  /**
+   * --check-lemmas: the verdict line(s) of the last lemma test ("lemmas ok
+   * (N checked)" etc., newline-terminated), or empty; clears it.
+   */
+  std::string takeLemmaCheckVerdict();
 
  private:
   /** --check-lemmas: a check-sat has run and its lemma test is still due. */
   bool d_lemmaCheckPending = false;
+  /** --check-lemmas: verdict of the last test, printed after the answer. */
+  std::string d_lemmaCheckVerdict;
 
   /**
    * Check that a generated Model (via getModel()) actually satisfies

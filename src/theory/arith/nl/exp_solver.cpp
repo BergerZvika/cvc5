@@ -44,7 +44,9 @@ ExpSolver::ExpSolver(Env& env,
       d_im(im),
       d_model(model),
       d_initRefine(userContext()),
-      d_halveIntroduced(userContext())
+      d_halveIntroduced(userContext()),
+      d_dividesPairs(userContext()),
+      d_dividesBase(userContext())
 {
   NodeManager* nm = nodeManager();
   d_false = nm->mkConst(false);
@@ -319,6 +321,14 @@ void ExpSolver::checkInitialRefine()
                         << std::endl;
     addExpLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
   }
+  // Divisibility by the base. Not model-driven, so it belongs here: the full
+  // refinement step comes last in the strategy and is rarely reached while
+  // the nonlinear steps before it keep producing lemmas.
+  if (ExpFeatureSet(options().arith.expLemmasMode, ExpFeatureAxis::LEMMAS)
+          .has("divides-base"))
+  {
+    checkDividesBaseInit();
+  }
 }
 
 
@@ -402,6 +412,11 @@ void ExpSolver::checkFullRefine() {
   if (lsel.has("fuse-base"))
   {
     checkFuseBaseRefine();
+  }
+  // Same-base divisibility. Its own scan over all pairs, for the same reason.
+  if (lsel.has("divides-pair"))
+  {
+    checkDividesPairRefine();
   }
 //   sortPow2sBasedOnModel();
   // add lemmas for each pow2 term
@@ -798,6 +813,127 @@ void ExpSolver::checkMonotonicityRefine()
       addExpLemma(
           lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
     }
+  }
+}
+
+void ExpSolver::checkDividesPairRefine()
+{
+  // Same-base divisibility:
+  //
+  //   s1 = s2 /\ t1 >= 0 /\ 0 < exp(s1,t1) /\ exp(s1,t1) <= exp(s2,t2)
+  //     =>  exp(s2,t2) mod exp(s1,t1) = 0
+  //
+  // Validity. With t1 >= 0, exp(s,t1) is the ordinary power s^t1. If |s| >= 2
+  // then t2 < 0 would give exp(s,t2) = 1 div s^|t2| = 0 < exp(s,t1), so
+  // t2 >= 0, and positivity of both values with |s|^t1 <= |s|^t2 forces
+  // t1 <= t2, hence s^t1 | s^t2. If s is 1 or -1, exp(s,t1) > 0 means it is 1,
+  // which divides everything. If s = 0, exp(0,t1) > 0 means t1 = 0 and the
+  // divisor is 1. The guard t1 >= 0 is what keeps the s = 0 case out of the
+  // division-by-zero values exp(0,t) = 1 div 0 for t < 0.
+  //
+  // Only pairs of EXP terms that are both already present are related, and
+  // only when the candidate model satisfies the antecedent and violates the
+  // conclusion; each pair is emitted at most once per user context. The lemma
+  // introduces a mod term but no EXP term.
+  NodeManager* nm = nodeManager();
+  struct DivPoint
+  {
+    Node n;
+    Integer s;
+    Integer t;
+    Integer v;
+  };
+  std::vector<DivPoint> pts;
+  pts.reserve(d_exps.size());
+  for (const Node& e : d_exps)
+  {
+    Node vs = d_model.computeConcreteModelValue(e[0]);
+    Node vt = d_model.computeConcreteModelValue(e[1]);
+    Node ve = d_model.computeAbstractModelValue(e);
+    if (!vs.isConst() || !vt.isConst() || !ve.isConst())
+    {
+      continue;
+    }
+    pts.push_back({e,
+                   vs.getConst<Rational>().getNumerator(),
+                   vt.getConst<Rational>().getNumerator(),
+                   ve.getConst<Rational>().getNumerator()});
+  }
+  for (const DivPoint& lo : pts)
+  {
+    for (const DivPoint& hi : pts)
+    {
+      if (lo.n == hi.n || lo.s != hi.s || lo.t.sgn() < 0 || lo.v.sgn() <= 0
+          || lo.v > hi.v)
+      {
+        continue;
+      }
+      // the model must violate the conclusion
+      if (hi.v.euclidianDivideRemainder(lo.v).isZero())
+      {
+        continue;
+      }
+      Node key = nm->mkNode(Kind::SEXPR, lo.n, hi.n);
+      if (d_dividesPairs.find(key) != d_dividesPairs.end())
+      {
+        continue;
+      }
+      d_dividesPairs.insert(key);
+      std::vector<Node> ant;
+      if (lo.n[0] != hi.n[0])
+      {
+        ant.push_back(lo.n[0].eqNode(hi.n[0]));
+      }
+      ant.push_back(nm->mkNode(Kind::GEQ, lo.n[1], d_zero));
+      ant.push_back(nm->mkNode(Kind::LT, d_zero, lo.n));
+      ant.push_back(nm->mkNode(Kind::LEQ, lo.n, hi.n));
+      Node lem = nm->mkNode(
+          Kind::IMPLIES,
+          nm->mkAnd(ant),
+          nm->mkNode(Kind::INTS_MODULUS, hi.n, lo.n).eqNode(d_zero));
+      Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; DIVIDES_PAIR"
+                         << std::endl;
+      addExpLemma(lem, InferenceId::ARITH_NL_EXP_MONOTONE_REFINE, nullptr, true);
+    }
+  }
+}
+
+void ExpSolver::checkDividesBaseInit()
+{
+  // Divisibility by the base:
+  //
+  //   t != 0 /\ s != 0  =>  exp(s,t) mod s = 0
+  //
+  // Validity. For t > 0, exp(s,t) = s^t = s * s^(t-1). For t < 0, exp(s,t) =
+  // 1 div s^|t|, which is 0 for |s| >= 2 and +-1 for s = +-1; 0 is divisible
+  // by anything, and anything is divisible by +-1. The guard s != 0 is needed
+  // because x mod 0 is unspecified in SMT-LIB (and exp(0,t) for t < 0 is
+  // 1 div 0); t != 0 because exp(s,0) = 1.
+  //
+  // Emitted once per term per user context, NOT filtered by the model: the
+  // model of exp(s,t) itself is usually divisible by s, the violation sits in
+  // the nonlinear product s * (exp(s,t) div s) that purifies the mod, which
+  // a model check on the EXP term never sees. The lemma introduces a mod term
+  // but no EXP term, so it cannot grow the term set. Terms with a constant
+  // exponent are skipped: the rewriter already evaluates or unrolls them.
+  NodeManager* nm = nodeManager();
+  for (const Node& e : d_exps)
+  {
+    if (e[1].isConst() || d_dividesBase.find(e) != d_dividesBase.end())
+    {
+      continue;
+    }
+    d_dividesBase.insert(e);
+    Node ant = nm->mkNode(Kind::AND,
+                          e[1].eqNode(d_zero).notNode(),
+                          e[0].eqNode(d_zero).notNode());
+    Node lem = nm->mkNode(
+        Kind::IMPLIES,
+        ant,
+        nm->mkNode(Kind::INTS_MODULUS_TOTAL, e, e[0]).eqNode(d_zero));
+    Trace("exp-lemma") << "ExpSolver::Lemma: " << lem << " ; DIVIDES_BASE"
+                       << std::endl;
+    addExpLemma(lem, InferenceId::ARITH_NL_EXP_INIT_REFINE);
   }
 }
 

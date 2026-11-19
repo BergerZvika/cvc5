@@ -139,6 +139,13 @@ class CVC5_EXPORT Cmd
    */
   virtual void printResult(cvc5::Solver* solver, std::ostream& out) const;
   /**
+   * Hook run BEFORE the result is printed. A command whose answer must be
+   * vetted first (the --check-lemmas test of check-sat) does it here; an
+   * exception raised here turns into a command failure and the result is
+   * not printed.
+   */
+  virtual void prePrintResult(cvc5::Solver* solver) {}
+  /**
    * Hook run by invokeAndPrintResult AFTER the result was printed. A command
    * that has deferred work whose output must follow its answer (the
    * --check-lemmas verdict of check-sat) does it here; an exception raised
@@ -457,8 +464,8 @@ class CVC5_EXPORT CheckSatCommand : public Cmd
   CheckSatCommand();
   cvc5::Result getResult() const;
   void invoke(cvc5::Solver* solver, parser::SymManager* sm) override;
+  void prePrintResult(cvc5::Solver* solver) override;
   void printResult(cvc5::Solver* solver, std::ostream& out) const override;
-  void postPrintResult(cvc5::Solver* solver) override;
   std::string getCommandName() const override;
   void toStream(std::ostream& out) const override;
 
@@ -480,8 +487,8 @@ class CVC5_EXPORT CheckSatAssumingCommand : public Cmd
   const std::vector<cvc5::Term>& getTerms() const;
   cvc5::Result getResult() const;
   void invoke(cvc5::Solver* solver, parser::SymManager* sm) override;
+  void prePrintResult(cvc5::Solver* solver) override;
   void printResult(cvc5::Solver* solver, std::ostream& out) const override;
-  void postPrintResult(cvc5::Solver* solver) override;
   std::string getCommandName() const override;
   void toStream(std::ostream& out) const override;
 

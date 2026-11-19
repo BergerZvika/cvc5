@@ -1,0 +1,159 @@
+; Rewrite Rules for integer exponentiation, (exp s t)
+;
+; `exp` is the RARE spelling of the EXP kind, SMT-LIB's (** s t); `**` is
+; accepted as well (src/rewriter/node.py, SYMBOL_ALIASES).
+;
+; Compiled at build time by src/theory/pbv/generate_rewriter.py --profile exp
+; into theory_exp_rewriter.cpp, and applied by the arith rewriter under
+; --arith-exp-rare-rewrites (off by default): for EXP terms in
+; ArithRewriter::postRewriteExp, after constant evaluation and BEFORE the
+; hand-written EXP rewrites there; for div/mod terms before the hand-written
+; div/mod rewrites. Like every RARE file, the rules are also part of the proof
+; rewrite database. These rules are the paper's Table `tab:exp-rewrites`
+; (generated into tables/rr-exp.tex, proved in Lean in RareExp.lean).
+;
+; Semantics (see theory/evaluator.cpp): (exp s t) is s^t for t >= 0, with
+; 0^0 = 1, and for t < 0 it is 1 div s^|t| -- 0 unless s = 1 or s = -1.
+; It is NOT the s^|t| reading of the SwInE paper: a rule that is valid only
+; under that reading (e.g. (exp s t) = (exp s (- t))) is unsound here.
+;
+; Every rule must hold for ALL integers, in particular negative exponents.
+;
+; Side conditions are EVALUATED by the generated rewriter: a rule fires only
+; when its condition evaluates to true, so a condition on a free term (such as
+; e >= 0 for a symbolic e) blocks the rule rather than being assumed. The
+; guarded rules below therefore fire in the solver only on numeral arguments,
+; and are otherwise statements for the proof database; the preprocessing passes
+; that need them under entailed guards (the reducing-instances merge,
+; --arith-pow2-norm) check those guards themselves.
+;
+; Only rules whose left-hand side is an exp, div or mod term are accepted: the
+; arith rewriter calls this rewriter for those kinds only, so any other rule
+; would never fire, and the generator stops the build instead.
+;
+; Not a rule: const-eval, exp(c, d) -> c^d for numerals c and d. It is
+; evaluation, done by ArithRewriter::postRewriteExp before these rules run
+; (and by the EVALUATE proof rule), since RARE cannot restrict a variable to
+; numerals.
+
+; ---------------------------------------------------------------------------
+; Constant exponent or base
+; ---------------------------------------------------------------------------
+
+; source: swine
+; s^0 = 1 for every s, including s = 0.
+(define-rule exp-const-zero
+  ((s Int))
+  (exp s 0)
+  1)
+
+; source: swine
+(define-rule exp-const-one
+  ((s Int))
+  (exp s 1)
+  s)
+
+; source: swine
+; 1^t = 1, and for t < 0, 1 div 1 = 1.
+(define-rule exp-const-base-one
+  ((t Int))
+  (exp 1 t)
+  1)
+
+; 0^t is 1 at t = 0 and 0 otherwise: 0^t = 0 for t > 0, and for t < 0 the
+; base is not +-1, so the value is 0.
+(define-rule exp-const-base-zero
+  ((t Int))
+  (exp 0 t)
+  (ite (= t 0) 1 0))
+
+; A negative exponent gives 1 div s^|t|, which is 0 unless s = +-1 (for s = 0,
+; 1 div 0 = 0). This is what cvc5's evaluator computes; SwInE's s^|t| reading
+; differs exactly here.
+(define-cond-rule exp-const-neg
+  ((s Int) (t Int))
+  (and (< t 0) (not (= s 1)) (not (= s (- 1))))
+  (exp s t)
+  0)
+
+; ---------------------------------------------------------------------------
+; Small numeral exponents
+; ---------------------------------------------------------------------------
+
+; (exp a e)^c expands into a product of c copies of exp(a, e), so that
+; lemma collapse introduces no new base. The guard e >= 0 is the paper's; the
+; identity holds without it.
+(define-cond-rule exp-normalize
+  ((a Int) (e Int) (c Int))
+  (and (>= e 0) (>= c 2))
+  (exp (exp a e) c)
+  (* (exp a e) (exp (exp a e) (- c 1))))
+
+; source: swine
+; s^c -> s * s^(c-1) for a numeral 2 <= c <= 8; repeated, it yields the
+; product of c copies of s. The bound is the paper's N (cvc5's
+; --arith-exp-unroll-bound, default 8). Positive exponents only: unrolling a
+; negative one would need 1 div (s * ... * s).
+(define-cond-rule exp-unroll
+  ((s Int) (c Int))
+  (and (>= c 2) (<= c 8))
+  (exp s c)
+  (* s (exp s (- c 1))))
+
+; ---------------------------------------------------------------------------
+; Reducing instances: powers of one base whose exponents differ by c
+; ---------------------------------------------------------------------------
+
+; b^(e+c) = b^c * b^e. Needs e >= 0: for b = 2, e = -1, c = 1 the left side is
+; exp(2, 0) = 1 but the right side is 2 * exp(2, -1) = 0.
+(define-cond-rule exp-reduce-mul
+  ((b Int) (e Int) (c Int))
+  (and (>= e 0) (>= c 0))
+  (exp b (+ e c))
+  (* (exp b c) (exp b e)))
+
+; For the unit base -1 no guard on e is needed ((-1)^t = (-1)^|t| for every
+; t). Base 1 is exp-const-base-one.
+(define-cond-rule exp-reduce-mul-neg-one
+  ((e Int) (c Int))
+  (>= c 0)
+  (exp (- 1) (+ e c))
+  (* (exp (- 1) c) (exp (- 1) e)))
+
+; b^(f-c) = b^f div b^c. Needs b != 0 (exp(0,0) = 1 but exp(0,1) div 0 = 0)
+; and f-c >= 0 unless b = +-1 (b = -2, f = 1, c = 2: exp(-2,-1) = 0 but
+; (-2) div 4 = -1). reduce-common, which moves powers up and down around a
+; pivot, is this rule together with exp-reduce-mul.
+(define-cond-rule exp-reduce-div
+  ((b Int) (f Int) (c Int))
+  (and (not (= b 0)) (>= c 0) (or (>= (- f c) 0) (= b 1) (= b (- 1))))
+  (exp b (- f c))
+  (div (exp b f) (exp b c)))
+
+; ---------------------------------------------------------------------------
+; Shift normalization (--arith-pow2-norm)
+; ---------------------------------------------------------------------------
+
+; (x div p) div q = x div (p * q) for p, q > 0: nested right shifts by
+; 2^i and 2^j fuse into one shift by 2^i * 2^j.
+(define-cond-rule exp-div-fuse
+  ((x Int) (p Int) (q Int))
+  (and (> p 0) (> q 0))
+  (div (div x p) q)
+  (div x (* p q)))
+
+; A summand a * 2^e of a dividend of mod 2^k vanishes once 0 <= k <= e: it is
+; a multiple of 2^k. k >= 0 is needed: for k = -1, 2^k = 0 and mod 0 is the
+; identity, so a * 2^e would not vanish.
+(define-cond-rule exp-shl-past
+  ((a Int) (e Int) (k Int) (r Int))
+  (and (>= k 0) (>= e k))
+  (mod (+ (* a (exp 2 e)) r) (exp 2 k))
+  (mod r (exp 2 k)))
+
+; The same with no other summand: the whole dividend vanishes.
+(define-cond-rule exp-shl-past-single
+  ((a Int) (e Int) (k Int))
+  (and (>= k 0) (>= e k))
+  (mod (* a (exp 2 e)) (exp 2 k))
+  0)

@@ -19,6 +19,7 @@ from rule import Rule
 from util import die, fresh_name
 
 symbol_to_op = {e.symbol: e for e in Op if e.symbol is not None}
+symbol_to_op.update(SYMBOL_ALIASES)
 
 
 class SymbolTable:

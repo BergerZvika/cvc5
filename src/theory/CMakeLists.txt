@@ -17,6 +17,11 @@ libcvc5_add_sources(GENERATED
   rewriter_tables.h
   theory_traits.h
   pbv/theory_pbv_rewriter.cpp
+  pbv/theory_pbv_rewriter.h
+  pbv/theory_piand_rewriter.cpp
+  pbv/theory_piand_rewriter.h
+  pbv/theory_exp_rewriter.cpp
+  pbv/theory_exp_rewriter.h
   type_enumerator.cpp
 )
 
@@ -59,19 +64,68 @@ add_custom_command(
 set(gen_pbv_rewriter_script
   ${CMAKE_CURRENT_LIST_DIR}/pbv/generate_rewriter.py)
 
-add_custom_command(
-  OUTPUT
-    pbv/theory_pbv_rewriter.cpp
-  COMMAND
-    ${Python_EXECUTABLE}
-    ${gen_pbv_rewriter_script}
-    --output-dir ${CMAKE_CURRENT_BINARY_DIR}/pbv
-  DEPENDS
-    ${gen_pbv_rewriter_script}
-    ${CMAKE_CURRENT_LIST_DIR}/pbv/rewrites
-  COMMENT
-    "Generating theory_pbv_rewriter.cpp"
-)
+# Format the generated PBV rewriters with the project's .clang-format, if
+# clang-format is available (otherwise the files are left as generated).
+find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format)
+set(pbv_clang_format_style ${PROJECT_SOURCE_DIR}/.clang-format)
+if(CLANG_FORMAT_EXECUTABLE)
+  set(pbv_format_deps ${pbv_clang_format_style})
+endif()
+
+# Generate pbv/<base>.h and pbv/<base>.cpp from the RARE file pbv/<rewrites>
+# with generate_rewriter.py --profile <profile>. The header does not depend on
+# the rules, so editing a rule recompiles only the generated .cpp.
+function(pbv_generate_rewriter profile rewrites base)
+  set(out_dir ${CMAKE_CURRENT_BINARY_DIR}/pbv)
+  if(CLANG_FORMAT_EXECUTABLE)
+    set(fmt_h COMMAND ${CLANG_FORMAT_EXECUTABLE} -i
+      --style=file:${pbv_clang_format_style} ${out_dir}/${base}.h)
+    set(fmt_cpp COMMAND ${CLANG_FORMAT_EXECUTABLE} -i
+      --style=file:${pbv_clang_format_style} ${out_dir}/${base}.cpp)
+  endif()
+  add_custom_command(
+    OUTPUT
+      pbv/${base}.h
+    COMMAND
+      ${Python_EXECUTABLE}
+      ${gen_pbv_rewriter_script}
+      --profile ${profile}
+      --only header
+      --output-dir ${out_dir}
+    ${fmt_h}
+    DEPENDS
+      ${gen_pbv_rewriter_script}
+      ${pbv_format_deps}
+    COMMENT
+      "Generating ${base}.h"
+  )
+  add_custom_command(
+    OUTPUT
+      pbv/${base}.cpp
+    COMMAND
+      ${Python_EXECUTABLE}
+      ${gen_pbv_rewriter_script}
+      --profile ${profile}
+      --only impl
+      --output-dir ${out_dir}
+    ${fmt_cpp}
+    DEPENDS
+      ${gen_pbv_rewriter_script}
+      ${pbv_format_deps}
+      ${CMAKE_CURRENT_LIST_DIR}/pbv/${rewrites}
+      ${CMAKE_CURRENT_LIST_DIR}/../rewriter/mkrewrites.py
+      ${CMAKE_CURRENT_LIST_DIR}/../rewriter/node.py
+      ${CMAKE_CURRENT_LIST_DIR}/../rewriter/rule.py
+      ${CMAKE_CURRENT_LIST_DIR}/../rewriter/rw_parser.py
+      ${CMAKE_CURRENT_LIST_DIR}/../rewriter/util.py
+    COMMENT
+      "Generating ${base}.cpp from pbv/${rewrites}"
+  )
+endfunction()
+
+pbv_generate_rewriter(pbv rewrites theory_pbv_rewriter)
+pbv_generate_rewriter(piand rewrites-piand theory_piand_rewriter)
+pbv_generate_rewriter(exp rewrites-exp theory_exp_rewriter)
 
 add_custom_target(gen-theory
   DEPENDS
@@ -79,4 +133,9 @@ add_custom_target(gen-theory
     theory_traits.h
     rewriter_tables.h
     pbv/theory_pbv_rewriter.cpp
+    pbv/theory_pbv_rewriter.h
+    pbv/theory_piand_rewriter.cpp
+    pbv/theory_piand_rewriter.h
+    pbv/theory_exp_rewriter.cpp
+    pbv/theory_exp_rewriter.h
 )
